@@ -93,6 +93,7 @@
   <div class="panel">
     <p class="mini">Exports now show a preview. Imports are checked for duplicates before anything is saved.</p>
     <div class="btn-row"><button class="btn btn-ghost" onclick="openExportPreview('csv')">⬆ CSV</button><button class="btn btn-ghost" onclick="openExportPreview('xlsx')">⬆ Excel</button></div>
+    <div class="btn-row"><button class="btn btn-ghost" onclick="openExportPreview('xlsx')">⬇ XLSX candidates</button><button class="btn btn-ghost" onclick="openExportPreview('csv')">⬇ CSV candidates</button></div>
     <div class="btn-row"><button class="btn btn-ghost" onclick="openExportPreview('json')">⬆ JSON backup</button><button class="btn btn-ghost" onclick="document.getElementById('importFile').click()">⬇ Import file</button></div>
     <div class="btn-row"><button class="btn btn-ghost" onclick="downloadImportTemplate()">⬇ Download Excel Template</button></div>
     <div class="btn-row"><button class="btn btn-ghost" onclick="openReferralExportPreview()">⬆ XLSX Referral Pool</button></div>
@@ -162,8 +163,16 @@ const CARD_FIELDS=["name","location","gender","age","phone","whatsapp","notes","
 window.addEventListener("DOMContentLoaded",()=>{
   try{const s=JSON.parse(localStorage.getItem("chStages")||"null");if(Array.isArray(s)&&s.length)STAGES=s}catch(e){}
   populateStatusSelect();buildFilterChips();buildRangeChips();renderStagesSettings();
+
+  // LOCAL FIRST: always restore the device copy before connecting to Firebase.
+  // This prevents an empty/late cloud snapshot from making the app appear to have 0 candidates.
+  loadLocal();
+
   const savedCfg=localStorage.getItem("chFirebaseConfig");
-  if(savedCfg){try{const cfg=JSON.parse(savedCfg);fillConfigForm(cfg);initFirebase(cfg,true)}catch(e){loadLocal()}}else loadLocal();
+  if(savedCfg){
+    try{const cfg=JSON.parse(savedCfg);fillConfigForm(cfg);initFirebase(cfg,true).catch(e=>{console.error(e);updateSyncUI(false)})}
+    catch(e){console.error(e)}
+  }
 });
 const $=id=>document.getElementById(id);
 function loadLocal(){try{candidates=JSON.parse(localStorage.getItem("chCandidates")||"[]").map(hydrateCandidate)}catch(e){candidates=[]}render()}
@@ -174,7 +183,48 @@ function fillConfigForm(c){$("cfgApiKey").value=c.apiKey||"";$("cfgAuthDomain").
 function readConfigForm(){return{apiKey:$("cfgApiKey").value.trim(),authDomain:$("cfgAuthDomain").value.trim(),projectId:$("cfgProjectId").value.trim(),storageBucket:$("cfgStorageBucket").value.trim(),messagingSenderId:$("cfgSenderId").value.trim(),appId:$("cfgAppId").value.trim()}}
 async function connectFirebase(){const cfg=readConfigForm();if(!cfg.apiKey||!cfg.projectId||!cfg.appId)return toast("Please fill API key, project ID and app ID");try{await initFirebase(cfg,false);localStorage.setItem("chFirebaseConfig",JSON.stringify(cfg));toast("Connected and syncing")}catch(e){toast("Couldn't connect: "+e.message)}}
 async function initFirebase(cfg){if(firebase.apps.length){try{await firebase.app().delete()}catch(e){}}firebase.initializeApp(cfg);auth=firebase.auth();db=firebase.firestore();await auth.signInAnonymously();useFirebase=true;listenFirestore();updateSyncUI(true)}
-function listenFirestore(){if(unsubscribe)unsubscribe();unsubscribe=db.collection("candidates").orderBy("createdAt","desc").onSnapshot(s=>{candidates=s.docs.map(d=>hydrateCandidate({id:d.id,...d.data()}));render()},e=>toast("Sync error: "+e.message))}
+function mergeCloudCandidates(cloudRows){
+  // Cloud updates must MERGE into the local-first database, never replace it wholesale.
+  // Index by document id and normalized phone/WhatsApp so imports remain visible while sync catches up.
+  const localRows=Array.isArray(candidates)?candidates.map(hydrateCandidate):[];
+  const byId=new Map(),byPhone=new Map();
+  localRows.forEach(c=>{
+    if(c.id)byId.set(String(c.id),c);
+    const p=normalizePhone(c.phone),w=normalizePhone(c.whatsapp);
+    if(p&&!byPhone.has(p))byPhone.set(p,c);
+    if(w&&!byPhone.has(w))byPhone.set(w,c);
+  });
+
+  for(const raw of cloudRows){
+    const cloud=hydrateCandidate(raw);
+    const p=normalizePhone(cloud.phone),w=normalizePhone(cloud.whatsapp);
+    const local=(cloud.id&&byId.get(String(cloud.id)))||(p&&byPhone.get(p))||(w&&byPhone.get(w));
+    if(local){
+      Object.assign(local,cloud);
+      if(cloud.id)byId.set(String(cloud.id),local);
+      if(p)byPhone.set(p,local);if(w)byPhone.set(w,local);
+    }else{
+      localRows.push(cloud);
+      if(cloud.id)byId.set(String(cloud.id),cloud);
+      if(p)byPhone.set(p,cloud);if(w)byPhone.set(w,cloud);
+    }
+  }
+
+  localRows.sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));
+  candidates=localRows;
+  saveLocal();
+}
+function listenFirestore(){
+  if(unsubscribe)unsubscribe();
+  unsubscribe=db.collection("candidates").orderBy("createdAt","desc").onSnapshot(
+    s=>{
+      const cloudRows=s.docs.map(d=>({id:d.id,...d.data()}));
+      mergeCloudCandidates(cloudRows);
+      render();
+    },
+    e=>toast("Sync error: "+e.message)
+  )
+}
 function disconnectFirebase(){if(unsubscribe)unsubscribe();useFirebase=false;localStorage.removeItem("chFirebaseConfig");updateSyncUI(false);loadLocal();toast("Disconnected. Saving locally.")}
 function updateSyncUI(on){$("syncPill").className="sync-pill "+(on?"on":"off");$("syncPillText").textContent=on?"Synced across devices":"Local only · tap to sync devices";$("disconnectRow").style.display=on?"flex":"none"}
 
@@ -425,7 +475,7 @@ function prepareImport(rows){
   pendingImport=rows.map((raw,i)=>{
     const row=canonicalRow(raw),geo=classifyLocation(row.location,row._originalLocation),cityCheck=cityPlaceCheck(row._importCity,row._originalLocation),invalid=!row.name||!normalizePhone(row.phone),existingDup=invalid?null:findDuplicate(row),p=normalizePhone(row.phone),w=normalizePhone(row.whatsapp),fileDup=!invalid&&((p&&seen.get(p))||(w&&seen.get(w)))||null,dup=existingDup||fileDup;
     const locationAutoSelect=!cityCheck.conflict&&(geo.autoSelect||cityCheck.autoSelect);
-    const result={idx:i,row,dup,existingDup,fileDup,invalid,geo,cityCheck,locationAutoSelect,selected:!invalid&&!dup&&locationAutoSelect,cityEdited:false,locationEdited:false};
+    const result={idx:i,row,dup,existingDup,fileDup,invalid,geo,cityCheck,locationAutoSelect,selected:!invalid&&!dup&&locationAutoSelect,cityEdited:false,locationEdited:false,locationReviewed:false};
     if(!invalid){if(p&&!seen.has(p))seen.set(p,result);if(w&&!seen.has(w))seen.set(w,result)}
     return result;
   });
@@ -435,7 +485,18 @@ function importRowClass(x){if(x.invalid)return "row-invalid";if(x.fileDup||x.exi
 function locationBadge(x){if(x.geo.code==="review"&&x.cityCheck?.code==="verified")return `<span class="location-badge location-ok">${escapeHtml(x.cityCheck.label)}</span>`;const cls=x.geo.code==="outside"?"location-outside":x.geo.code==="review"?"location-review":x.geo.code==="mofussil"?"location-mofussil":"location-ok";return `<span class="location-badge ${cls}">${escapeHtml(x.geo.label)}</span>`}
 function importResultText(x){return x.invalid?"Invalid":x.fileDup?"Duplicate in file":x.existingDup?"Already exists":x.cityCheck?.conflict?"City/place mismatch":(x.geo.code==="review"&&x.cityCheck?.code!=="verified")?"Location unclear":"Ready"}
 function importNeedsLocationEdit(x){return !!(x.cityCheck?.conflict||x.cityCheck?.code==="city-missing"||x.cityCheck?.code==="place-missing"||(x.geo.code==="review"&&x.cityCheck?.code!=="verified"))}
-function importCanSelect(x){if(x.invalid||x.fileDup)return false;if(x.existingDup&&pendingDupAction!=="update")return false;return !importNeedsLocationEdit(x)&&x.locationAutoSelect}
+function importCanSelect(x){
+  if(x.invalid||x.fileDup)return false;
+  if(x.existingDup&&pendingDupAction!=="update")return false;
+  // A manual City/Location correction is an explicit human review.
+  // Do not keep the row blocked just because the automatic classifier is cautious.
+  if(x.locationReviewed){
+    const hasCity=!!String(x.row._importCity||x.row.city||"").trim();
+    const hasPlace=!!String(x.row._originalLocation||x.row.location||"").trim();
+    return hasCity&&hasPlace&&!x.cityCheck?.conflict;
+  }
+  return !importNeedsLocationEdit(x)&&x.locationAutoSelect
+}
 function updateImportLocation(i,field,value){
   const x=pendingImport[i];if(!x)return;
   if(field==="city"){
@@ -447,15 +508,16 @@ function updateImportLocation(i,field,value){
     x.row.location=normalizeLocation(x.row._originalLocation);
     x.locationEdited=true;
   }
+  x.locationReviewed=true;
   x.row.zone=generateZone(x.row.city,x.row.location);
   x.geo=classifyLocation(x.row.location,x.row._originalLocation);
   x.cityCheck=cityPlaceCheck(x.row._importCity,x.row._originalLocation);
   x.locationAutoSelect=!x.cityCheck.conflict&&(x.geo.autoSelect||x.cityCheck.autoSelect);
-  if(!x.invalid&&!x.dup&&x.locationAutoSelect&&!importNeedsLocationEdit(x))x.selected=true;
+  if(importCanSelect(x))x.selected=true;
   openImportPreview();
 }
 function renderImportRow(x,i){
-  const editLoc=importNeedsLocationEdit(x);
+  const editLoc=importNeedsLocationEdit(x)||x.locationReviewed;
   const cityCell=editLoc?`<input class="preview-edit" value="${escapeHtml(x.row._importCity||"")}" onchange="updateImportLocation(${i},'city',this.value)">${x.cityEdited?'<span class="edited-mark">Edited</span>':''}`:`<span class="preview-readonly">${escapeHtml(x.row._importCity||"—")}</span>`;
   const locCell=editLoc?`<input class="preview-edit" value="${escapeHtml(x.row._originalLocation||"")}" onchange="updateImportLocation(${i},'location',this.value)">${x.locationEdited?'<span class="edited-mark">Edited</span>':''}`:`<span class="preview-readonly">${escapeHtml(x.row._originalLocation||"—")}</span>`;
   const disabled=importCanSelect(x)?"":"disabled";
@@ -470,10 +532,26 @@ function openImportPreview(){
   const ready=indexed.filter(({x})=>x.selected);
   const group=(label,rows)=>rows.length?`<tr class="preview-group-row"><td colspan="11">${label} · ${rows.length}</td></tr>${rows.map(({x,i})=>renderImportRow(x,i)).join("")}`:"";
   $("previewTitle").textContent="Import preview";
-  $("previewBody").innerHTML=`<div class="preview-summary"><div class="preview-stat"><b>${selectedCount}</b><span>Selected</span></div><div class="preview-stat"><b>${attention.length}</b><span>Needs attention</span></div><div class="preview-stat"><b>${conflicts}</b><span>City conflicts</span></div><div class="preview-stat"><b>${d}</b><span>Duplicates</span></div><div class="preview-stat"><b>${v}</b><span>Invalid</span></div></div><div class="field"><label>Existing duplicate action</label><select id="dupAction" onchange="pendingDupAction=this.value;openImportPreview()"><option value="skip" ${pendingDupAction==="skip"?"selected":""}>Skip existing duplicates</option><option value="update" ${pendingDupAction==="update"?"selected":""}>Update existing candidates</option></select></div><p class="mini"><b>Review first:</b> Unselected/problem rows are grouped at the top. City and Location are editable only when a location needs attention. Once corrected, a valid row becomes selectable automatically.</p><div class="btn-row"><button class="btn btn-ghost" onclick="toggleImportAll()">${toggleLabel}</button></div><div class="preview-scroll"><table class="preview-table"><thead><tr><th>✓</th><th>Name</th><th>Age</th><th>Gender</th><th>City</th><th>Place / Location</th><th>Normalized</th><th>Check</th><th>Phone</th><th>WhatsApp</th><th>Result</th></tr></thead><tbody>${group("⚠ Needs attention / not selected",attention)}${group("✓ Ready to import",ready)}</tbody></table></div><div id="importProgress" class="import-progress"></div><div class="import-actions"><button class="btn btn-ghost" onclick="closePreview()">Cancel</button><button class="btn btn-primary" id="confirmImportBtn" onclick="confirmImport()">Import selected (${selectedCount})</button></div>`;
+  $("previewBody").innerHTML=`<div class="preview-summary"><div class="preview-stat"><b>${selectedCount}</b><span>Selected</span></div><div class="preview-stat"><b>${attention.length}</b><span>Needs attention</span></div><div class="preview-stat"><b>${conflicts}</b><span>City conflicts</span></div><div class="preview-stat"><b>${d}</b><span>Duplicates</span></div><div class="preview-stat"><b>${v}</b><span>Invalid</span></div></div><div class="field"><label>Existing duplicate action</label><select id="dupAction" onchange="pendingDupAction=this.value;openImportPreview()"><option value="skip" ${pendingDupAction==="skip"?"selected":""}>Skip existing duplicates</option><option value="update" ${pendingDupAction==="update"?"selected":""}>Update existing candidates</option></select></div><p class="mini"><b>Review first:</b> Unselected/problem rows are grouped at the top. City and Location are editable only when a location needs attention. Once corrected, a valid row becomes selectable automatically.</p><div class="btn-row"><button class="btn btn-ghost" onclick="toggleImportAll()">${toggleLabel}</button></div><div class="preview-scroll"><table class="preview-table"><thead><tr><th>✓</th><th>Name</th><th>Age</th><th>Gender</th><th>City</th><th>Place / Location</th><th>Normalized</th><th>Check</th><th>Phone</th><th>WhatsApp</th><th>Result</th></tr></thead><tbody>${group("⚠ Needs attention / not selected",attention)}${group("✓ Ready to import",ready)}</tbody></table></div><div id="importProgress" class="import-progress"></div><div class="btn-row"><button class="btn btn-ghost" onclick="downloadEditedImportXLSX()">⬇ Download edited XLSX</button></div><div class="import-actions"><button class="btn btn-ghost" onclick="closePreview()">Cancel</button><button class="btn btn-primary" id="confirmImportBtn" onclick="confirmImport()">Import selected (${selectedCount})</button></div>`;
   showPreview();
 }
 function toggleImportAll(){const selectable=pendingImport.filter(importCanSelect),allSelected=selectable.length>0&&selectable.every(x=>x.selected);selectable.forEach(x=>x.selected=!allSelected);openImportPreview()}
+function downloadEditedImportXLSX(){
+  if(!pendingImport.length)return toast("Nothing in import preview to download");
+  const rows=pendingImport.map(x=>{
+    const r={...x.row};
+    r.city=String(r._importCity||r.city||"").trim();
+    r.location=String(r._originalLocation||r.location||"").trim();
+    delete r._importCity;delete r._originalLocation;delete r._rawAge;
+    return Object.fromEntries(IMPORT_TEMPLATE_COLS.map(k=>[k,r[k]??""]));
+  });
+  const ws=XLSX.utils.json_to_sheet(rows,{header:IMPORT_TEMPLATE_COLS});
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Edited Candidates");
+  XLSX.writeFile(wb,"candidate_hub_edited_candidates.xlsx");
+  toast(`Downloaded ${rows.length} edited candidate(s)`);
+}
+
 async function runImportPool(items,worker,limit=12,onProgress){
   let next=0,done=0;
   const runners=Array.from({length:Math.min(limit,items.length)},async()=>{
