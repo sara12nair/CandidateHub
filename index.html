@@ -33,18 +33,20 @@
 /* Filtered candidate print/PDF report */
 #printRoot{display:none}
 @media print{
-  @page{size:A4 landscape;margin:10mm 9mm 9mm}
+  @page{size:A4 landscape;margin:7mm 8mm 7mm}
   body{background:#fff!important;padding:0!important;font-family:Arial,sans-serif!important;color:#111!important}
   body>*:not(#printRoot){display:none!important}
   #printRoot{display:block!important}
-  .print-page{page-break-after:always;break-after:page;min-height:185mm;position:relative;padding-bottom:11mm;box-sizing:border-box}
+  .print-page{page-break-after:always;break-after:page;min-height:196mm;position:relative;padding-bottom:9mm;box-sizing:border-box}
   .print-page:last-child{page-break-after:auto;break-after:auto}
   .print-head{text-align:center;border-bottom:1.5px solid #333;padding-bottom:5px;margin-bottom:6px}
   .print-head h1{font-size:15px;margin:0 0 2px;letter-spacing:.5px}
   .print-head h2{font-size:11px;margin:0 0 3px;font-weight:700}
   .print-criteria{font-size:8px;line-height:1.3;color:#333}
   .print-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:7.5px}
-  .print-table th,.print-table td{border:1px solid #888;padding:3px 4px;vertical-align:top;overflow-wrap:anywhere}
+  .print-table th,.print-table td{border:1px solid #888;padding:2.5px 4px;vertical-align:top;overflow-wrap:anywhere;line-height:1.15}
+  .print-table td{height:6mm;max-height:6mm;overflow:hidden}
+  .print-note-cut{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.15;max-height:2.3em}
   .print-table th{background:#eee!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-weight:700}
   .print-table .num{width:4%}.print-table .name{width:15%}.print-table .age{width:5%}.print-table .gender{width:7%}.print-table .location{width:15%}.print-table .phone{width:10%}.print-table .wa{width:10%}.print-table .status{width:11%}.print-table .follow{width:9%}.print-table .notes{width:14%}
   .print-foot{position:absolute;left:0;right:0;bottom:0;border-top:1px solid #777;padding-top:4px;display:grid;grid-template-columns:1fr 1fr 1fr;font-size:8px}
@@ -284,9 +286,9 @@ function printFilterDescription(){
 function printStamp(){const d=new Date(),p=n=>String(n).padStart(2,'0');return `${String(d.getFullYear()).slice(-2)}${p(d.getMonth()+1)}_${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`}
 function printFilteredCandidates(){
   const rows=filteredCandidates();if(!rows.length)return toast('No candidates in the current filter');
-  const perPage=12,totalPages=Math.ceil(rows.length/perPage),stamp=printStamp(),criteria=printFilterDescription(),root=$('printRoot');
+  const perPage=25,totalPages=Math.ceil(rows.length/perPage),stamp=printStamp(),criteria=printFilterDescription(),root=$('printRoot');
   const short=v=>{const x=String(v||'').replace(/\s+/g,' ').trim();return x.length>90?x.slice(0,87)+'…':x};
-  root.innerHTML=Array.from({length:totalPages},(_,p)=>{const pageRows=rows.slice(p*perPage,(p+1)*perPage);return `<section class="print-page"><header class="print-head"><h1>CANDIDATE HUB</h1><h2>Filtered Candidate Report</h2><div class="print-criteria">${escapeHtml(criteria)} | Matching candidates: ${rows.length}</div></header><table class="print-table"><thead><tr><th class="num">Sl.No.</th><th class="name">Name</th><th class="age">Age</th><th class="gender">Gender</th><th class="location">City / Location</th><th class="phone">Phone</th><th class="wa">WhatsApp</th><th class="status">Status</th><th class="follow">Follow-up</th><th class="notes">Notes</th></tr></thead><tbody>${pageRows.map((c,i)=>`<tr><td>${p*perPage+i+1}</td><td>${escapeHtml(c.name||'')}</td><td>${escapeHtml(c.age||'')}</td><td>${escapeHtml(c.gender||'')}</td><td>${escapeHtml([c.city,c.location].filter(Boolean).join(' / '))}</td><td>${escapeHtml(c.phone||'')}</td><td>${escapeHtml(c.whatsapp||c.phone||'')}</td><td>${escapeHtml(c.status||'')}</td><td>${escapeHtml(c.followup||'')}</td><td>${escapeHtml(short(c.notes))}</td></tr>`).join('')}</tbody></table><footer class="print-foot"><span>Page ${p+1} of ${totalPages}</span><span>Printed on ${stamp}</span><span>Sashi Nair</span></footer></section>`}).join('');
+  root.innerHTML=Array.from({length:totalPages},(_,p)=>{const pageRows=rows.slice(p*perPage,(p+1)*perPage);return `<section class="print-page"><header class="print-head"><h1>CANDIDATE HUB</h1><h2>Filtered Candidate Report</h2><div class="print-criteria">${escapeHtml(criteria)} | Matching candidates: ${rows.length}</div></header><table class="print-table"><thead><tr><th class="num">Sl.No.</th><th class="name">Name</th><th class="age">Age</th><th class="gender">Gender</th><th class="location">City / Location</th><th class="phone">Phone</th><th class="wa">WhatsApp</th><th class="status">Status</th><th class="follow">Follow-up</th><th class="notes">Notes</th></tr></thead><tbody>${pageRows.map((c,i)=>`<tr><td>${p*perPage+i+1}</td><td>${escapeHtml(c.name||'')}</td><td>${escapeHtml(c.age||'')}</td><td>${escapeHtml(c.gender||'')}</td><td>${escapeHtml([c.city,c.location].filter(Boolean).join(' / '))}</td><td>${escapeHtml(c.phone||'')}</td><td>${escapeHtml(c.whatsapp||c.phone||'')}</td><td>${escapeHtml(c.status||'')}</td><td>${escapeHtml(c.followup||'')}</td><td><div class="print-note-cut">${escapeHtml(short(c.notes))}</div></td></tr>`).join('')}</tbody></table><footer class="print-foot"><span>Page ${p+1} of ${totalPages}</span><span>Printed on ${stamp}</span><span>Sashi Nair</span></footer></section>`}).join('');
   const cleanup=()=>{root.innerHTML='';window.removeEventListener('afterprint',cleanup)};window.addEventListener('afterprint',cleanup);window.print();
 }
 function renderList(){renderListControls();const list=filteredCandidates(),activeCount=candidates.filter(c=>!c.referralPool).length;const meta=$("filterMeta"),clear=$("clearFiltersBtn");if(meta)meta.textContent=`Showing ${list.length} of ${activeCount} active candidate${activeCount===1?"":"s"}`;if(clear)clear.disabled=activeFilter==="all"&&!locationFilter&&!sourceFilter&&!qualificationFilter&&!genderFilter&&!ageFilter&&!positionFilter&&!expFilter&&sortMode==="newest"&&!$("searchInput").value.trim();$("listView").innerHTML=list.length?list.map(cardHtml).join(""):`<div class="empty-state"><span class="emoji">🌱</span><h3>${activeCount?"No matches":"No active candidates"}</h3><p>${activeCount?"Try another search or filter.":"Candidates moved to Insurance remain safely available in the Insurance tab."}</p></div>`}
@@ -449,7 +451,55 @@ function openImportPreview(){
   showPreview();
 }
 function toggleImportAll(on){pendingImport.forEach(x=>x.selected=on&&!x.invalid&&!x.fileDup&&!x.existingDup&&x.locationAutoSelect);openImportPreview()}
-async function confirmImport(){const action=$("dupAction").value;let added=0,updated=0,skipped=0;for(const x of pendingImport){if(x.fileDup){skipped++;continue}if(!x.selected||x.invalid)continue;if(x.existingDup&&action==="skip"){skipped++;continue}const row={...x.row,updatedAt:Date.now()};delete row._originalLocation;delete row._importCity;if(x.existingDup&&action==="update"){if(useFirebase)await db.collection("candidates").doc(x.existingDup.id).set(row,{merge:true});else Object.assign(x.existingDup,row);updated++;continue}row.createdAt=Date.now()+added;if(useFirebase){try{await createFirebaseCandidate(row);added++}catch(err){if(err&&err.code==="candidate-duplicate"){skipped++;continue}throw err}}else{const raceDup=findManualDuplicate(row);if(raceDup){skipped++;continue}row.id="c_"+Date.now()+Math.random().toString(36).slice(2,7);candidates.unshift(row);added++}}if(!useFirebase)render();closePreview();$("importFile").value="";toast(`Import complete: ${added} added, ${updated} updated, ${skipped} skipped`)}
+async function confirmImport(){
+  const action=$("dupAction")?.value||"skip";
+  const chosen=pendingImport.filter(x=>x.selected&&!x.invalid&&!x.fileDup);
+  if(!chosen.length){toast("No candidates selected for import");return}
+  const btn=[...document.querySelectorAll("#previewBody button")].find(b=>b.textContent.includes("Import selected"));
+  const oldText=btn?.textContent||"Import selected";
+  if(btn){btn.disabled=true;btn.textContent=`Importing 0 / ${chosen.length}…`}
+  let added=0,updated=0,skipped=0,failed=0,done=0;
+  try{
+    for(const x of pendingImport){
+      if(x.fileDup){skipped++;continue}
+      if(!x.selected||x.invalid)continue;
+      if(x.existingDup&&action==="skip"){skipped++;done++;if(btn)btn.textContent=`Importing ${done} / ${chosen.length}…`;continue}
+      const row={...x.row,updatedAt:Date.now()};
+      delete row._originalLocation;delete row._importCity;delete row._rawAge;
+      try{
+        if(x.existingDup&&action==="update"){
+          if(useFirebase)await db.collection("candidates").doc(x.existingDup.id).set(row,{merge:true});
+          else Object.assign(x.existingDup,row);
+          updated++;
+        }else{
+          row.createdAt=Date.now()+added;
+          if(useFirebase){
+            try{await createFirebaseCandidate(row);added++}
+            catch(err){if(err&&err.code==="candidate-duplicate"){skipped++}else throw err}
+          }else{
+            const raceDup=findManualDuplicate(row);
+            if(raceDup)skipped++;
+            else{row.id="c_"+Date.now()+Math.random().toString(36).slice(2,7);candidates.unshift(row);added++}
+          }
+        }
+      }catch(err){
+        failed++;
+        console.error("Candidate import failed",x.row?.name,err);
+        if(failed===1)toast("Import error: "+(err?.message||"Unable to save candidate"));
+      }
+      done++;
+      if(btn)btn.textContent=`Importing ${done} / ${chosen.length}…`;
+    }
+    if(!useFirebase){saveLocal();render()}
+    if(added||updated||skipped||failed){
+      closePreview();
+      $("importFile").value="";
+      toast(`Import complete: ${added} added, ${updated} updated, ${skipped} skipped${failed?`, ${failed} failed`:""}`)
+    }
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=oldText}
+  }
+}
 function handleImportFile(e){const file=e.target.files[0];if(!file)return;const n=file.name.toLowerCase(),r=new FileReader();if(n.endsWith(".json")){r.onload=()=>{try{const p=JSON.parse(r.result);if(p&&Array.isArray(p.candidates)){if(Array.isArray(p.stages)&&p.stages.length){STAGES=p.stages;saveStages()}prepareImport(p.candidates)}else prepareImport(Array.isArray(p)?p:[p])}catch(err){toast("Invalid JSON")}};r.readAsText(file)}else if(n.endsWith(".xlsx")||n.endsWith(".xls")){r.onload=()=>{try{const wb=XLSX.read(new Uint8Array(r.result),{type:"array"});prepareImport(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:""}))}catch(err){toast("Couldn't read Excel")}};r.readAsArrayBuffer(file)}else{r.onload=()=>{try{prepareImport(parseCSV(r.result))}catch(err){toast("Couldn't read CSV")}};r.readAsText(file)}}
 function parseCSV(text){const rows=[];let row=[],cur="",q=false;for(let i=0;i<text.length;i++){const ch=text[i];if(q){if(ch==='"'&&text[i+1]==='"'){cur+='"';i++}else if(ch==='"')q=false;else cur+=ch}else{if(ch==='"')q=true;else if(ch===','){row.push(cur);cur=""}else if(ch==='\n'){row.push(cur);rows.push(row);row=[];cur=""}else if(ch!=='\r')cur+=ch}}if(cur||row.length){row.push(cur);rows.push(row)}const headers=(rows.shift()||[]).map(canonicalKey);return rows.filter(r=>r.some(v=>String(v).trim())).map(r=>Object.fromEntries(headers.map((h,i)=>[h,r[i]??""])))}
 
