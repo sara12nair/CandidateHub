@@ -216,7 +216,10 @@ function mergeCloudCandidates(cloudRows){
 }
 function listenFirestore(){
   if(unsubscribe)unsubscribe();
-  unsubscribe=db.collection("candidates").orderBy("createdAt","desc").onSnapshot(
+  // Do not order the Firestore query by createdAt here. Firestore excludes documents
+  // that do not contain the ordered field, which made older/imported candidates
+  // disappear and produced a misleading 0-candidate cloud count. We sort locally.
+  unsubscribe=db.collection("candidates").onSnapshot(
     s=>{
       const cloudRows=s.docs.map(d=>({id:d.id,...d.data()}));
       mergeCloudCandidates(cloudRows);
@@ -475,7 +478,7 @@ function prepareImport(rows){
   pendingImport=rows.map((raw,i)=>{
     const row=canonicalRow(raw),geo=classifyLocation(row.location,row._originalLocation),cityCheck=cityPlaceCheck(row._importCity,row._originalLocation),invalid=!row.name||!normalizePhone(row.phone),existingDup=invalid?null:findDuplicate(row),p=normalizePhone(row.phone),w=normalizePhone(row.whatsapp),fileDup=!invalid&&((p&&seen.get(p))||(w&&seen.get(w)))||null,dup=existingDup||fileDup;
     const locationAutoSelect=!cityCheck.conflict&&(geo.autoSelect||cityCheck.autoSelect);
-    const result={idx:i,row,dup,existingDup,fileDup,invalid,geo,cityCheck,locationAutoSelect,selected:!invalid&&!dup&&locationAutoSelect,cityEdited:false,locationEdited:false,locationReviewed:false};
+    const result={idx:i,row,dup,existingDup,fileDup,invalid,geo,cityCheck,locationAutoSelect,selected:!invalid&&!dup,cityEdited:false,locationEdited:false,locationReviewed:false};
     if(!invalid){if(p&&!seen.has(p))seen.set(p,result);if(w&&!seen.has(w))seen.set(w,result)}
     return result;
   });
@@ -486,29 +489,28 @@ function locationBadge(x){if(x.geo.code==="review"&&x.cityCheck?.code==="verifie
 function importResultText(x){return x.invalid?"Invalid":x.fileDup?"Duplicate in file":x.existingDup?"Already exists":x.cityCheck?.conflict?"City/place mismatch":(x.geo.code==="review"&&x.cityCheck?.code!=="verified")?"Location unclear":"Ready"}
 function importNeedsLocationEdit(x){return !!(x.cityCheck?.conflict||x.cityCheck?.code==="city-missing"||x.cityCheck?.code==="place-missing"||(x.geo.code==="review"&&x.cityCheck?.code!=="verified"))}
 function importCanSelect(x){
+  // Only genuinely invalid rows or duplicates that are being skipped are blocked.
+  // Location warnings are REVIEW information, not an import lock.
   if(x.invalid||x.fileDup)return false;
   if(x.existingDup&&pendingDupAction!=="update")return false;
-  // A manual City/Location correction is an explicit human review.
-  // Do not keep the row blocked just because the automatic classifier is cautious.
-  if(x.locationReviewed){
-    const hasCity=!!String(x.row._importCity||x.row.city||"").trim();
-    const hasPlace=!!String(x.row._originalLocation||x.row.location||"").trim();
-    return hasCity&&hasPlace&&!x.cityCheck?.conflict;
-  }
-  return !importNeedsLocationEdit(x)&&x.locationAutoSelect
+  return true;
 }
-function updateImportLocation(i,field,value){
+function updateImportField(i,field,value){
   const x=pendingImport[i];if(!x)return;
-  if(field==="city"){
+  if(field==="age"){
+    x.row.age=normalizeImportedAge(value);
+    x.ageEdited=true;
+  }else if(field==="city"){
     x.row._importCity=String(value??"").trim();
     x.row.city=normalizeLocation(x.row._importCity);
     x.cityEdited=true;
-  }else{
+    x.locationReviewed=true;
+  }else if(field==="location"){
     x.row._originalLocation=String(value??"").trim();
     x.row.location=normalizeLocation(x.row._originalLocation);
     x.locationEdited=true;
+    x.locationReviewed=true;
   }
-  x.locationReviewed=true;
   x.row.zone=generateZone(x.row.city,x.row.location);
   x.geo=classifyLocation(x.row.location,x.row._originalLocation);
   x.cityCheck=cityPlaceCheck(x.row._importCity,x.row._originalLocation);
@@ -516,12 +518,13 @@ function updateImportLocation(i,field,value){
   if(importCanSelect(x))x.selected=true;
   openImportPreview();
 }
+function updateImportLocation(i,field,value){updateImportField(i,field,value)}
 function renderImportRow(x,i){
-  const editLoc=importNeedsLocationEdit(x)||x.locationReviewed;
-  const cityCell=editLoc?`<input class="preview-edit" value="${escapeHtml(x.row._importCity||"")}" onchange="updateImportLocation(${i},'city',this.value)">${x.cityEdited?'<span class="edited-mark">Edited</span>':''}`:`<span class="preview-readonly">${escapeHtml(x.row._importCity||"—")}</span>`;
-  const locCell=editLoc?`<input class="preview-edit" value="${escapeHtml(x.row._originalLocation||"")}" onchange="updateImportLocation(${i},'location',this.value)">${x.locationEdited?'<span class="edited-mark">Edited</span>':''}`:`<span class="preview-readonly">${escapeHtml(x.row._originalLocation||"—")}</span>`;
+  const ageCell=`<input class="preview-edit" inputmode="numeric" style="min-width:64px;width:72px" value="${escapeHtml(x.row.age||"")}" placeholder="Age" onchange="updateImportField(${i},'age',this.value)">${x.ageEdited?'<span class="edited-mark">Edited</span>':''}`;
+  const cityCell=`<input class="preview-edit" value="${escapeHtml(x.row._importCity||x.row.city||"")}" onchange="updateImportField(${i},'city',this.value)">${x.cityEdited?'<span class="edited-mark">Edited</span>':''}`;
+  const locCell=`<input class="preview-edit" value="${escapeHtml(x.row._originalLocation||x.row.location||"")}" onchange="updateImportField(${i},'location',this.value)">${x.locationEdited?'<span class="edited-mark">Edited</span>':''}`;
   const disabled=importCanSelect(x)?"":"disabled";
-  return `<tr class="${importRowClass(x)}"><td><input type="checkbox" ${x.selected?"checked":""} ${disabled} onchange="pendingImport[${i}].selected=this.checked;openImportPreview()"></td><td>${escapeHtml(x.row.name)}</td><td>${escapeHtml(x.row.age||"—")}</td><td>${escapeHtml(x.row.gender)}</td><td>${cityCell}</td><td>${locCell}</td><td>${escapeHtml(x.row.location||"")}</td><td>${x.cityCheck?.conflict?'<span class="location-badge location-outside">⚠ Conflict</span>':locationBadge(x)}</td><td>${escapeHtml(x.row.phone)}</td><td>${escapeHtml(x.row.whatsapp)}</td><td>${importResultText(x)}</td></tr>`;
+  return `<tr class="${importRowClass(x)}"><td><input type="checkbox" ${x.selected?"checked":""} ${disabled} onchange="pendingImport[${i}].selected=this.checked;openImportPreview()"></td><td>${escapeHtml(x.row.name)}</td><td>${ageCell}</td><td>${escapeHtml(x.row.gender)}</td><td>${cityCell}</td><td>${locCell}</td><td>${escapeHtml(x.row.location||"")}</td><td>${x.cityCheck?.conflict?'<span class="location-badge location-outside">⚠ Conflict</span>':locationBadge(x)}</td><td>${escapeHtml(x.row.phone)}</td><td>${escapeHtml(x.row.whatsapp)}</td><td>${importResultText(x)}</td></tr>`;
 }
 function openImportPreview(){
   const selectedCount=pendingImport.filter(x=>x.selected).length,conflicts=pendingImport.filter(x=>x.cityCheck?.conflict).length,review=pendingImport.filter(x=>importNeedsLocationEdit(x)&&!x.invalid).length,d=pendingImport.filter(x=>x.dup).length,v=pendingImport.filter(x=>x.invalid).length;
@@ -532,7 +535,7 @@ function openImportPreview(){
   const ready=indexed.filter(({x})=>x.selected);
   const group=(label,rows)=>rows.length?`<tr class="preview-group-row"><td colspan="11">${label} · ${rows.length}</td></tr>${rows.map(({x,i})=>renderImportRow(x,i)).join("")}`:"";
   $("previewTitle").textContent="Import preview";
-  $("previewBody").innerHTML=`<div class="preview-summary"><div class="preview-stat"><b>${selectedCount}</b><span>Selected</span></div><div class="preview-stat"><b>${attention.length}</b><span>Needs attention</span></div><div class="preview-stat"><b>${conflicts}</b><span>City conflicts</span></div><div class="preview-stat"><b>${d}</b><span>Duplicates</span></div><div class="preview-stat"><b>${v}</b><span>Invalid</span></div></div><div class="field"><label>Existing duplicate action</label><select id="dupAction" onchange="pendingDupAction=this.value;openImportPreview()"><option value="skip" ${pendingDupAction==="skip"?"selected":""}>Skip existing duplicates</option><option value="update" ${pendingDupAction==="update"?"selected":""}>Update existing candidates</option></select></div><p class="mini"><b>Review first:</b> Unselected/problem rows are grouped at the top. City and Location are editable only when a location needs attention. Once corrected, a valid row becomes selectable automatically.</p><div class="btn-row"><button class="btn btn-ghost" onclick="toggleImportAll()">${toggleLabel}</button></div><div class="preview-scroll"><table class="preview-table"><thead><tr><th>✓</th><th>Name</th><th>Age</th><th>Gender</th><th>City</th><th>Place / Location</th><th>Normalized</th><th>Check</th><th>Phone</th><th>WhatsApp</th><th>Result</th></tr></thead><tbody>${group("⚠ Needs attention / not selected",attention)}${group("✓ Ready to import",ready)}</tbody></table></div><div id="importProgress" class="import-progress"></div><div class="btn-row"><button class="btn btn-ghost" onclick="downloadEditedImportXLSX()">⬇ Download edited XLSX</button></div><div class="import-actions"><button class="btn btn-ghost" onclick="closePreview()">Cancel</button><button class="btn btn-primary" id="confirmImportBtn" onclick="confirmImport()">Import selected (${selectedCount})</button></div>`;
+  $("previewBody").innerHTML=`<div class="preview-summary"><div class="preview-stat"><b>${selectedCount}</b><span>Selected</span></div><div class="preview-stat"><b>${attention.length}</b><span>Needs attention</span></div><div class="preview-stat"><b>${conflicts}</b><span>City conflicts</span></div><div class="preview-stat"><b>${d}</b><span>Duplicates</span></div><div class="preview-stat"><b>${v}</b><span>Invalid</span></div></div><div class="field"><label>Existing duplicate action</label><select id="dupAction" onchange="pendingDupAction=this.value;openImportPreview()"><option value="skip" ${pendingDupAction==="skip"?"selected":""}>Skip existing duplicates</option><option value="update" ${pendingDupAction==="update"?"selected":""}>Update existing candidates</option></select></div><p class="mini"><b>Review first:</b> Unselected/problem rows are grouped at the top. Age, City and Location are editable in every row. Location warnings do not block import; only invalid rows and skipped duplicates are locked.</p><div class="btn-row"><button class="btn btn-ghost" onclick="toggleImportAll()">${toggleLabel}</button></div><div class="preview-scroll"><table class="preview-table"><thead><tr><th>✓</th><th>Name</th><th>Age</th><th>Gender</th><th>City</th><th>Place / Location</th><th>Normalized</th><th>Check</th><th>Phone</th><th>WhatsApp</th><th>Result</th></tr></thead><tbody>${group("⚠ Needs attention / not selected",attention)}${group("✓ Ready to import",ready)}</tbody></table></div><div id="importProgress" class="import-progress"></div><div class="btn-row"><button class="btn btn-ghost" onclick="downloadEditedImportXLSX()">⬇ Download edited XLSX</button></div><div class="import-actions"><button class="btn btn-ghost" onclick="closePreview()">Cancel</button><button class="btn btn-primary" id="confirmImportBtn" onclick="confirmImport()">Import selected (${selectedCount})</button></div>`;
   showPreview();
 }
 function toggleImportAll(){const selectable=pendingImport.filter(importCanSelect),allSelected=selectable.length>0&&selectable.every(x=>x.selected);selectable.forEach(x=>x.selected=!allSelected);openImportPreview()}
@@ -622,7 +625,9 @@ async function confirmImport(){
 
     if(x.existingDup&&action==="update"){
       const live=candidates.find(c=>c.id===x.existingDup.id)||x.existingDup;
+      const originalCreatedAt=live.createdAt;
       Object.assign(live,hydrateCandidate(row));
+      if(!Number(live.createdAt)&&Number(originalCreatedAt))live.createdAt=originalCreatedAt;
       if(p)phoneIndex.set(p,live);if(w)phoneIndex.set(w,live);
       const docId=(useFirebase&&String(x.existingDup.id||"").startsWith("phone_"))?x.existingDup.id:firebaseCandidateId(row);
       if(useFirebase&&docId)syncRows.push({docId,row:{...live}});
@@ -633,6 +638,9 @@ async function confirmImport(){
     // Constant-time duplicate check against existing + rows already accepted in this import.
     if((p&&phoneIndex.has(p))||(w&&phoneIndex.has(w))){skipped++;continue}
 
+    // New imported candidates must always have createdAt. Firestore queries and
+    // newest-first sorting depend on this field.
+    if(!Number(row.createdAt))row.createdAt=stamp+n;
     const docId=firebaseCandidateId(row);
     row.id=useFirebase&&docId?docId:"c_"+(stamp+n)+Math.random().toString(36).slice(2,7);
     const localRow=hydrateCandidate(row);
@@ -651,7 +659,7 @@ async function confirmImport(){
   closePreview();
 
   const parts=[`${added} added locally`];if(updated)parts.push(`${updated} updated locally`);if(skipped)parts.push(`${skipped} skipped`);
-  toast(`Import saved: ${parts.join(", ")}`);
+  if(!useFirebase)toast(`Import saved: ${parts.join(", ")}`);
 
   // Let the browser paint the closed preview first; redraw the candidate UI afterwards.
   setTimeout(()=>{
@@ -661,10 +669,50 @@ async function confirmImport(){
     if(currentTab==="insights")renderInsights();
   },0);
 
-  // CLOUD SECOND: completely backgrounded.
+  // CLOUD: do not report success until Firestore has actually accepted and verified the rows.
   if(useFirebase&&syncRows.length){
-    $("syncPillText").textContent=`Saved locally · cloud sync starting…`;
-    setTimeout(()=>syncImportedRowsToCloud(syncRows),25);
+    const syncPill=$("syncPillText");
+    try{
+      if(syncPill)syncPill.textContent=`Uploading ${syncRows.length} candidate(s) to cloud…`;
+      if(btn){btn.disabled=true;btn.textContent=`Uploading to cloud…`}
+
+      // Stop listener during the batch so UI refreshes cannot interfere with import state.
+      if(unsubscribe){unsubscribe();unsubscribe=null}
+      let done=0;
+      for(let i=0;i<syncRows.length;i+=400){
+        const chunk=syncRows.slice(i,i+400),batch=db.batch();
+        chunk.forEach(item=>{
+          const clean={...item.row};
+          delete clean.id;delete clean._originalLocation;delete clean._importCity;delete clean._rawAge;
+          if(!Number(clean.createdAt))clean.createdAt=Date.now();
+          clean.updatedAt=Number(clean.updatedAt)||Date.now();
+          batch.set(db.collection("candidates").doc(item.docId),clean,{merge:true});
+        });
+        await batch.commit();
+        done+=chunk.length;
+        if(syncPill)syncPill.textContent=`Cloud upload ${done}/${syncRows.length}`;
+      }
+
+      // Verify the exact imported document IDs exist in Firestore before declaring success.
+      let verified=0;
+      for(let i=0;i<syncRows.length;i+=10){
+        const checks=await Promise.all(syncRows.slice(i,i+10).map(item=>db.collection("candidates").doc(item.docId).get()));
+        verified+=checks.filter(s=>s.exists).length;
+      }
+      if(verified!==syncRows.length)throw new Error(`Cloud verification failed: ${verified}/${syncRows.length} records found`);
+
+      if(syncPill)syncPill.textContent=`Synced across devices · ${verified} verified`;
+      listenFirestore();
+      toast(`Import complete: ${added} added, ${updated} updated · ${verified} verified in cloud`);
+    }catch(err){
+      console.error("Cloud import failed",err);
+      if(syncPill)syncPill.textContent="Local copy saved · cloud import FAILED";
+      // Restart listener even after failure.
+      try{listenFirestore()}catch(e){}
+      toast("CLOUD IMPORT FAILED: "+(err?.message||String(err)));
+    }
+  }else if(useFirebase&&chosen.length&&!syncRows.length){
+    toast(`Nothing was written to cloud: ${skipped} row(s) skipped as duplicates`);
   }
 }
 
