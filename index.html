@@ -485,54 +485,90 @@ async function runImportPool(items,worker,limit=12,onProgress){
   });
   await Promise.all(runners);
 }
+async function syncImportedRowsToCloud(syncRows){
+  if(!useFirebase||!db||!syncRows.length)return;
+  try{
+    if(unsubscribe){unsubscribe();unsubscribe=null}
+    const total=syncRows.length;
+    let done=0;
+    $("syncPillText").textContent=`Saved locally · syncing 0/${total}`;
+    for(let i=0;i<syncRows.length;i+=400){
+      const chunk=syncRows.slice(i,i+400),batch=db.batch();
+      chunk.forEach(item=>{
+        const clean={...item.row};delete clean.id;delete clean._originalLocation;delete clean._importCity;delete clean._rawAge;
+        const ref=db.collection("candidates").doc(item.docId);
+        batch.set(ref,clean,{merge:true});
+      });
+      await batch.commit();
+      done+=chunk.length;
+      $("syncPillText").textContent=`Saved locally · syncing ${done}/${total}`;
+    }
+    $("syncPillText").textContent="Synced across devices";
+    toast(`Cloud sync complete: ${total} candidate(s)`);
+    listenFirestore();
+  }catch(err){
+    console.error("Background cloud import sync failed",err);
+    $("syncPillText").textContent="Saved locally · cloud sync pending";
+    toast("Saved locally. Cloud sync could not finish: "+(err?.message||"network error"));
+  }
+}
+
 async function confirmImport(){
   const action=$("dupAction")?.value||pendingDupAction;
   pendingDupAction=action;
   const chosen=pendingImport.filter(x=>x.selected&&!x.invalid&&!x.fileDup);
   if(!chosen.length){toast("Nothing selected. Review the items at the top, then select rows to import.");return}
+
   const btn=$("confirmImportBtn"),progress=$("importProgress");
-  if(btn){btn.disabled=true;btn.textContent=`Importing ${chosen.length}…`}
-  if(progress)progress.textContent=`Preparing ${chosen.length} candidate(s)…`;
-  let added=0,updated=0,skipped=0,failed=0;
-  const stamp=Date.now();
+  if(btn){btn.disabled=true;btn.textContent=`Saving ${chosen.length} locally…`}
+  if(progress)progress.textContent=`Saving ${chosen.length} candidate(s) on this device…`;
 
-  const processOne=async(x,n)=>{
-    try{
-      if(x.existingDup&&action==="skip"){skipped++;return}
-      const row={...x.row,updatedAt:stamp+n};delete row._originalLocation;delete row._importCity;
-      if(x.existingDup&&action==="update"){
-        if(useFirebase)await db.collection("candidates").doc(x.existingDup.id).set(row,{merge:true});
-        else Object.assign(x.existingDup,row);
-        updated++;return;
-      }
-      row.createdAt=stamp+n;
-      if(useFirebase){
-        try{row.id=await createFirebaseCandidate(row);added++}
-        catch(err){if(err&&err.code==="candidate-duplicate"){skipped++;return}throw err}
-      }else{
-        const raceDup=findManualDuplicate(row);if(raceDup){skipped++;return}
-        row.id="c_"+(stamp+n)+Math.random().toString(36).slice(2,7);
-        candidates.unshift(hydrateCandidate(row));added++;
-      }
-    }catch(err){failed++;console.error("Candidate import failed",x?.row?.name,err)}
-  };
+  let added=0,updated=0,skipped=0;
+  const stamp=Date.now(),syncRows=[];
 
-  if(useFirebase){
-    await runImportPool(chosen,processOne,12,(done,total)=>{
-      if(progress)progress.textContent=`Importing ${done} of ${total}…`;
-    });
-  }else{
-    for(let n=0;n<chosen.length;n++){
-      await processOne(chosen[n],n);
-      if(progress&&((n+1)%25===0||n===chosen.length-1))progress.textContent=`Importing ${n+1} of ${chosen.length}…`;
+  // LOCAL FIRST: no network waits in this loop.
+  for(let n=0;n<chosen.length;n++){
+    const x=chosen[n];
+    if(x.existingDup&&action==="skip"){skipped++;continue}
+    const row={...x.row,updatedAt:stamp+n};
+    delete row._originalLocation;delete row._importCity;delete row._rawAge;
+
+    if(x.existingDup&&action==="update"){
+      const live=candidates.find(c=>c.id===x.existingDup.id)||x.existingDup;
+      Object.assign(live,hydrateCandidate(row));
+      const docId=(useFirebase&&String(x.existingDup.id||"").startsWith("phone_"))?x.existingDup.id:firebaseCandidateId(row);
+      if(useFirebase&&docId)syncRows.push({docId,row:{...live}});
+      updated++;
+      continue;
     }
-    saveLocal();render();
+
+    const raceDup=findManualDuplicate(row);
+    if(raceDup){skipped++;continue}
+    const docId=firebaseCandidateId(row);
+    row.id=useFirebase&&docId?docId:"c_"+(stamp+n)+Math.random().toString(36).slice(2,7);
+    const localRow=hydrateCandidate(row);
+    candidates.unshift(localRow);
+    if(useFirebase&&docId)syncRows.push({docId,row:{...localRow}});
+    added++;
   }
+
+  // Persist immediately even when Firebase is connected.
+  saveLocal();
+  renderStats();renderList();renderStagesSettings();
+  if(currentTab==="referral")renderReferralView();
+  if(currentTab==="report")renderReport();
+  if(currentTab==="insights")renderInsights();
 
   if($("importFile"))$("importFile").value="";
   closePreview();
-  const parts=[`${added} added`];if(updated)parts.push(`${updated} updated`);if(skipped)parts.push(`${skipped} skipped`);if(failed)parts.push(`${failed} failed`);
-  toast(`Import complete: ${parts.join(", ")}`);
+  const parts=[`${added} added locally`];if(updated)parts.push(`${updated} updated locally`);if(skipped)parts.push(`${skipped} skipped`);
+  toast(`Import saved: ${parts.join(", ")}`);
+
+  // CLOUD SECOND: start after UI/local save; do not block the import screen.
+  if(useFirebase&&syncRows.length){
+    $("syncPillText").textContent=`Saved locally · cloud sync starting…`;
+    setTimeout(()=>syncImportedRowsToCloud(syncRows),0);
+  }
 }
 
 function handleImportFile(e){const file=e.target.files[0];if(!file)return;const n=file.name.toLowerCase(),r=new FileReader();if(n.endsWith(".json")){r.onload=()=>{try{const p=JSON.parse(r.result);if(p&&Array.isArray(p.candidates)){if(Array.isArray(p.stages)&&p.stages.length){STAGES=p.stages;saveStages()}prepareImport(p.candidates)}else prepareImport(Array.isArray(p)?p:[p])}catch(err){toast("Invalid JSON")}};r.readAsText(file)}else if(n.endsWith(".xlsx")||n.endsWith(".xls")){r.onload=()=>{try{const wb=XLSX.read(new Uint8Array(r.result),{type:"array"});prepareImport(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:"",raw:false}))}catch(err){toast("Couldn't read Excel")}};r.readAsArrayBuffer(file)}else{r.onload=()=>{try{prepareImport(parseCSV(r.result))}catch(err){toast("Couldn't read CSV")}};r.readAsText(file)}}
