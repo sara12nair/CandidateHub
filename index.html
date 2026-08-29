@@ -523,51 +523,70 @@ async function confirmImport(){
   if(btn){btn.disabled=true;btn.textContent=`Saving ${chosen.length} locally…`}
   if(progress)progress.textContent=`Saving ${chosen.length} candidate(s) on this device…`;
 
-  let added=0,updated=0,skipped=0;
-  const stamp=Date.now(),syncRows=[];
+  // Build duplicate indexes ONCE. This avoids repeatedly scanning the full database.
+  const phoneIndex=new Map();
+  for(const c of candidates){
+    const p=normalizePhone(c.phone),w=normalizePhone(c.whatsapp);
+    if(p&&!phoneIndex.has(p))phoneIndex.set(p,c);
+    if(w&&!phoneIndex.has(w))phoneIndex.set(w,c);
+  }
 
-  // LOCAL FIRST: no network waits in this loop.
+  let added=0,updated=0,skipped=0;
+  const stamp=Date.now(),syncRows=[],newRows=[];
+
   for(let n=0;n<chosen.length;n++){
     const x=chosen[n];
     if(x.existingDup&&action==="skip"){skipped++;continue}
+
     const row={...x.row,updatedAt:stamp+n};
     delete row._originalLocation;delete row._importCity;delete row._rawAge;
+    const p=normalizePhone(row.phone),w=normalizePhone(row.whatsapp);
 
     if(x.existingDup&&action==="update"){
       const live=candidates.find(c=>c.id===x.existingDup.id)||x.existingDup;
       Object.assign(live,hydrateCandidate(row));
+      if(p)phoneIndex.set(p,live);if(w)phoneIndex.set(w,live);
       const docId=(useFirebase&&String(x.existingDup.id||"").startsWith("phone_"))?x.existingDup.id:firebaseCandidateId(row);
       if(useFirebase&&docId)syncRows.push({docId,row:{...live}});
       updated++;
       continue;
     }
 
-    const raceDup=findManualDuplicate(row);
-    if(raceDup){skipped++;continue}
+    // Constant-time duplicate check against existing + rows already accepted in this import.
+    if((p&&phoneIndex.has(p))||(w&&phoneIndex.has(w))){skipped++;continue}
+
     const docId=firebaseCandidateId(row);
     row.id=useFirebase&&docId?docId:"c_"+(stamp+n)+Math.random().toString(36).slice(2,7);
     const localRow=hydrateCandidate(row);
-    candidates.unshift(localRow);
+    newRows.push(localRow);
+    if(p)phoneIndex.set(p,localRow);if(w)phoneIndex.set(w,localRow);
     if(useFirebase&&docId)syncRows.push({docId,row:{...localRow}});
     added++;
   }
 
-  // Persist immediately even when Firebase is connected.
-  saveLocal();
-  renderStats();renderList();renderStagesSettings();
-  if(currentTab==="referral")renderReferralView();
-  if(currentTab==="report")renderReport();
-  if(currentTab==="insights")renderInsights();
+  // Add all new rows in ONE array operation instead of hundreds of unshift() calls.
+  if(newRows.length)candidates=newRows.reverse().concat(candidates);
 
+  // Persist immediately. No Firebase wait.
+  saveLocal();
   if($("importFile"))$("importFile").value="";
   closePreview();
+
   const parts=[`${added} added locally`];if(updated)parts.push(`${updated} updated locally`);if(skipped)parts.push(`${skipped} skipped`);
   toast(`Import saved: ${parts.join(", ")}`);
 
-  // CLOUD SECOND: start after UI/local save; do not block the import screen.
+  // Let the browser paint the closed preview first; redraw the candidate UI afterwards.
+  setTimeout(()=>{
+    renderStats();renderList();renderStagesSettings();
+    if(currentTab==="referral")renderReferralView();
+    if(currentTab==="report")renderReport();
+    if(currentTab==="insights")renderInsights();
+  },0);
+
+  // CLOUD SECOND: completely backgrounded.
   if(useFirebase&&syncRows.length){
     $("syncPillText").textContent=`Saved locally · cloud sync starting…`;
-    setTimeout(()=>syncImportedRowsToCloud(syncRows),0);
+    setTimeout(()=>syncImportedRowsToCloud(syncRows),25);
   }
 }
 
