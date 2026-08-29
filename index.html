@@ -474,38 +474,67 @@ function openImportPreview(){
   showPreview();
 }
 function toggleImportAll(){const selectable=pendingImport.filter(importCanSelect),allSelected=selectable.length>0&&selectable.every(x=>x.selected);selectable.forEach(x=>x.selected=!allSelected);openImportPreview()}
+async function runImportPool(items,worker,limit=12,onProgress){
+  let next=0,done=0;
+  const runners=Array.from({length:Math.min(limit,items.length)},async()=>{
+    while(true){
+      const i=next++;if(i>=items.length)break;
+      await worker(items[i],i);
+      done++;if(onProgress)onProgress(done,items.length);
+    }
+  });
+  await Promise.all(runners);
+}
 async function confirmImport(){
   const action=$("dupAction")?.value||pendingDupAction;
   pendingDupAction=action;
   const chosen=pendingImport.filter(x=>x.selected&&!x.invalid&&!x.fileDup);
   if(!chosen.length){toast("Nothing selected. Review the items at the top, then select rows to import.");return}
-  const btn=$("confirmImportBtn"),progress=$("importProgress");if(btn){btn.disabled=true;btn.textContent="Importing…"}
+  const btn=$("confirmImportBtn"),progress=$("importProgress");
+  if(btn){btn.disabled=true;btn.textContent=`Importing ${chosen.length}…`}
+  if(progress)progress.textContent=`Preparing ${chosen.length} candidate(s)…`;
   let added=0,updated=0,skipped=0,failed=0;
-  for(let n=0;n<chosen.length;n++){
-    const x=chosen[n];if(progress)progress.textContent=`Importing ${n+1} of ${chosen.length}…`;
+  const stamp=Date.now();
+
+  const processOne=async(x,n)=>{
     try{
-      if(x.existingDup&&action==="skip"){skipped++;continue}
-      const row={...x.row,updatedAt:Date.now()};delete row._originalLocation;delete row._importCity;
+      if(x.existingDup&&action==="skip"){skipped++;return}
+      const row={...x.row,updatedAt:stamp+n};delete row._originalLocation;delete row._importCity;
       if(x.existingDup&&action==="update"){
-        if(useFirebase)await db.collection("candidates").doc(x.existingDup.id).set(row,{merge:true});else Object.assign(x.existingDup,row);
-        updated++;continue;
+        if(useFirebase)await db.collection("candidates").doc(x.existingDup.id).set(row,{merge:true});
+        else Object.assign(x.existingDup,row);
+        updated++;return;
       }
-      row.createdAt=Date.now()+added;
+      row.createdAt=stamp+n;
       if(useFirebase){
         try{row.id=await createFirebaseCandidate(row);added++}
-        catch(err){if(err&&err.code==="candidate-duplicate"){skipped++;continue}throw err}
+        catch(err){if(err&&err.code==="candidate-duplicate"){skipped++;return}throw err}
       }else{
-        const raceDup=findManualDuplicate(row);if(raceDup){skipped++;continue}
-        row.id="c_"+Date.now()+Math.random().toString(36).slice(2,7);candidates.unshift(hydrateCandidate(row));added++;
+        const raceDup=findManualDuplicate(row);if(raceDup){skipped++;return}
+        row.id="c_"+(stamp+n)+Math.random().toString(36).slice(2,7);
+        candidates.unshift(hydrateCandidate(row));added++;
       }
     }catch(err){failed++;console.error("Candidate import failed",x?.row?.name,err)}
+  };
+
+  if(useFirebase){
+    await runImportPool(chosen,processOne,12,(done,total)=>{
+      if(progress)progress.textContent=`Importing ${done} of ${total}…`;
+    });
+  }else{
+    for(let n=0;n<chosen.length;n++){
+      await processOne(chosen[n],n);
+      if(progress&&((n+1)%25===0||n===chosen.length-1))progress.textContent=`Importing ${n+1} of ${chosen.length}…`;
+    }
+    saveLocal();render();
   }
-  if(!useFirebase){saveLocal();render()}
+
   if($("importFile"))$("importFile").value="";
   closePreview();
   const parts=[`${added} added`];if(updated)parts.push(`${updated} updated`);if(skipped)parts.push(`${skipped} skipped`);if(failed)parts.push(`${failed} failed`);
   toast(`Import complete: ${parts.join(", ")}`);
 }
+
 function handleImportFile(e){const file=e.target.files[0];if(!file)return;const n=file.name.toLowerCase(),r=new FileReader();if(n.endsWith(".json")){r.onload=()=>{try{const p=JSON.parse(r.result);if(p&&Array.isArray(p.candidates)){if(Array.isArray(p.stages)&&p.stages.length){STAGES=p.stages;saveStages()}prepareImport(p.candidates)}else prepareImport(Array.isArray(p)?p:[p])}catch(err){toast("Invalid JSON")}};r.readAsText(file)}else if(n.endsWith(".xlsx")||n.endsWith(".xls")){r.onload=()=>{try{const wb=XLSX.read(new Uint8Array(r.result),{type:"array"});prepareImport(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:"",raw:false}))}catch(err){toast("Couldn't read Excel")}};r.readAsArrayBuffer(file)}else{r.onload=()=>{try{prepareImport(parseCSV(r.result))}catch(err){toast("Couldn't read CSV")}};r.readAsText(file)}}
 function parseCSV(text){const rows=[];let row=[],cur="",q=false;for(let i=0;i<text.length;i++){const ch=text[i];if(q){if(ch==='"'&&text[i+1]==='"'){cur+='"';i++}else if(ch==='"')q=false;else cur+=ch}else{if(ch==='"')q=true;else if(ch===','){row.push(cur);cur=""}else if(ch==='\n'){row.push(cur);rows.push(row);row=[];cur=""}else if(ch!=='\r')cur+=ch}}if(cur||row.length){row.push(cur);rows.push(row)}const headers=(rows.shift()||[]).map(canonicalKey);return rows.filter(r=>r.some(v=>String(v).trim())).map(r=>Object.fromEntries(headers.map((h,i)=>[h,r[i]??""])))}
 
