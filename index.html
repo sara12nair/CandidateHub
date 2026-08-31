@@ -379,7 +379,25 @@ function exportCandidatePDF(){
   const printed=reportNow.toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
   const pad2=n=>String(n).padStart(2,'0');
   const reportStamp=`${pad2(reportNow.getFullYear()%100)}_${pad2(reportNow.getMonth()+1)}${pad2(reportNow.getDate())}_${pad2(reportNow.getHours())}${pad2(reportNow.getMinutes())}`;
-  const reportTitle=`Candidate Hub Report - ${reportStamp}`;
+  const safeFilePart=v=>String(v??'').trim().replace(/[\\/:*?"<>|]+/g,'-').replace(/\s+/g,' ').replace(/^-+|-+$/g,'');
+  const fileBits=[];
+  if(selected.length){
+    fileBits.push(`Selected ${rows.length}`);
+  }else{
+    const cat=activePeopleCategory==='all'?'All':categoryName(activePeopleCategory);
+    if(cat)fileBits.push(cat);
+    if(locationFilter)fileBits.push(locationFilter);
+    if(genderFilter)fileBits.push(genderFilter);
+    if(activeFilter!=="all")fileBits.push(activeFilter.replace(/^flag:|^status:/,""));
+    if(sourceFilter)fileBits.push(sourceFilter);
+    if(qualificationFilter)fileBits.push(qualificationFilter);
+    if(ageFilter)fileBits.push(ageFilter==='lt20'?'Under 20':ageFilter==='45plus'?'45+':ageFilter==='unknown'?'Age not entered':ageFilter);
+    if(positionFilter)fileBits.push(positionFilter);
+    if(expFilter)fileBits.push(expFilter);
+    const q=$("searchInput")?.value.trim();if(q)fileBits.push(q);
+  }
+  const shortDescriptor=fileBits.map(safeFilePart).filter(Boolean).join(' - ')||'All';
+  const reportTitle=`CH - ${shortDescriptor} - ${reportStamp}`;
   const criteria=(selected.length?'Manual selection':pdfFilterSummary())+' · Grouped by Location A–Z · Name A–Z within each location';
   const escp=v=>escapeHtml(String(v??''));
 
@@ -454,7 +472,16 @@ th:nth-child(2){width:34mm}th:nth-child(3){width:21mm}th:nth-child(4){width:24mm
 @media print{html,body{width:auto;height:auto}.pdf-page{height:196mm;min-height:196mm;max-height:196mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style></head><body>${pageHtml}</body></html>`);
   w.document.close();
-  setTimeout(()=>{try{w.focus();w.print()}catch(e){console.error(e)}},300);
+  // Some browsers decide the Save-as-PDF filename only after the new print
+  // document has fully loaded. Set the title again immediately before print.
+  try{w.document.title=reportTitle}catch(e){}
+  setTimeout(()=>{
+    try{
+      w.document.title=reportTitle;
+      w.focus();
+      w.print();
+    }catch(e){console.error(e)}
+  },700);
 }
 function renderList(){renderListControls();updateFilterToggle();const list=filteredCandidates(),shown=list.slice(0,displayedLimit),activeCount=candidates.filter(c=>personInCategory(c,activePeopleCategory)).length;const clear=$("clearFiltersBtn");if(clear)clear.disabled=activeFilter==="all"&&!locationFilter&&!sourceFilter&&!qualificationFilter&&!genderFilter&&!ageFilter&&!positionFilter&&!expFilter&&sortMode==="newest"&&!$("searchInput").value.trim();const more=list.length>shown.length?`<div class="load-more-panel"><p>Showing <b>${shown.length}</b> of <b>${list.length}</b> matching candidates</p><div class="load-more-actions"><button onclick="loadMoreCandidates()">Load next 50</button><button onclick="showAllCandidates()">Show all</button></div></div>`:"";$("listView").innerHTML=list.length?shown.map(cardHtml).join("")+more:`<div class="empty-state"><span class="emoji">🌱</span><h3>${activeCount?"No matches":"No people in this list"}</h3><p>${activeCount?"Try another search or filter.":"Assign people to this category from their record, or choose another list above."}</p></div>`;updateSelectionUI();requestAnimationFrame(updateScrollNav)}
 function loadMoreCandidates(){displayedLimit+=50;renderList()}
