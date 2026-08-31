@@ -331,22 +331,77 @@ function updateSelectionUI(){const visible=filteredCandidates(),sel=selectedCand
 function pdfFilterSummary(){const bits=[];const q=$("searchInput")?.value.trim();if(q)bits.push(`Search: ${q}`);if(activeFilter!=="all")bits.push(`View: ${activeFilter.replace(/^flag:|^status:/,"")}`);if(locationFilter)bits.push(`Location: ${locationFilter}`);if(sourceFilter)bits.push(`Source: ${sourceFilter}`);if(qualificationFilter)bits.push(`Qualification: ${qualificationFilter}`);if(genderFilter)bits.push(`Gender: ${genderFilter}`);if(ageFilter)bits.push(`Age: ${ageFilter}`);if(positionFilter)bits.push(`Position: ${positionFilter}`);if(expFilter)bits.push(`Experience: ${expFilter}`);return bits.length?bits.join(" · "):"All active candidates"}
 function exportCandidatePDF(){
   const selected=candidates.filter(c=>selectedCandidateIds.has(c.id));
-  const rows=(selected.length?selected:filteredCandidates()).slice().sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),undefined,{sensitivity:"base"}));
-  if(!rows.length)return toast("No candidates to export");
+  const base=(selected.length?selected:filteredCandidates()).slice();
+  if(!base.length)return toast("No candidates to export");
+
+  const locationLabel=c=>{
+    const loc=String(c.location||'').trim();
+    const city=String(c.city||'').trim();
+    if(loc&&city)return `${loc}, ${city}`;
+    return loc||city||'Location not entered';
+  };
+  const rows=base.sort((a,b)=>{
+    const la=locationLabel(a),lb=locationLabel(b);
+    return la.localeCompare(lb,undefined,{sensitivity:'base'}) || String(a.name||'').localeCompare(String(b.name||''),undefined,{sensitivity:'base'});
+  });
+
+  const groups=[];
+  rows.forEach(c=>{
+    const label=locationLabel(c);
+    let g=groups[groups.length-1];
+    if(!g||g.label.toLocaleLowerCase()!==label.toLocaleLowerCase()){
+      g={label,rows:[]};groups.push(g);
+    }
+    g.rows.push(c);
+  });
+
   const mode=selected.length?`Selected candidates (${rows.length})`:`Filtered candidates (${rows.length})`;
   const printed=new Date().toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  const criteria=(selected.length?'Manual selection':pdfFilterSummary())+' · Sorted by Name A–Z';
+  const criteria=(selected.length?'Manual selection':pdfFilterSummary())+' · Grouped by Location A–Z · Name A–Z within each location';
   const escp=v=>escapeHtml(String(v??''));
-  const PER_PAGE=30;
+
+  // Capacity is measured in row-units. A location heading uses a little more
+  // space than a candidate row. This keeps the fixed A4 landscape page clean.
+  const PAGE_UNITS=30;
+  const HEADING_UNITS=1.35;
+  const ROW_UNITS=1;
   const pages=[];
-  for(let i=0;i<rows.length;i+=PER_PAGE)pages.push(rows.slice(i,i+PER_PAGE));
+  let page={items:[],units:0};
+  let serial=1;
+  const pushPage=()=>{if(page.items.length){pages.push(page);page={items:[],units:0}}};
+
+  groups.forEach(group=>{
+    let idx=0;
+    while(idx<group.rows.length){
+      // Never place a location heading without room for at least one candidate.
+      if(page.units+HEADING_UNITS+ROW_UNITS>PAGE_UNITS)pushPage();
+      const continuing=idx>0;
+      page.items.push({type:'heading',label:group.label,count:group.rows.length,continuing});
+      page.units+=HEADING_UNITS;
+
+      while(idx<group.rows.length && page.units+ROW_UNITS<=PAGE_UNITS){
+        page.items.push({type:'row',candidate:group.rows[idx],serial:serial++});
+        page.units+=ROW_UNITS;
+        idx++;
+      }
+      // If the same location continues on another page, the next page gets
+      // a repeated "continued" heading so the area is never ambiguous.
+      if(idx<group.rows.length)pushPage();
+    }
+  });
+  pushPage();
+
   const header=`<div class="report-head"><h1>CANDIDATE HUB - CANDIDATE REPORT</h1><div class="sub">${escp(mode)}</div><div class="criteria">${escp(criteria)}</div></div>`;
   const colHead=`<thead><tr><th class="n">#</th><th>Name</th><th>Age / Gender</th><th>Phone</th><th>Location</th><th>Qualification</th><th>Position</th><th>Status</th><th>Priority</th><th>Follow-up</th></tr></thead>`;
-  const pageHtml=pages.map((pageRows,pageIndex)=>{
-    const first=pageIndex*PER_PAGE;
-    const body=pageRows.map((c,j)=>`<tr><td class="n">${first+j+1}</td><td>${escp(c.name)}</td><td>${escp([c.age,c.gender].filter(Boolean).join(' / '))}</td><td>${escp(c.phone)}</td><td>${escp([c.location,c.city].filter(Boolean).join(', '))}</td><td>${escp(c.qualification)}</td><td>${escp(c.position)}</td><td>${escp(c.status)}</td><td>${escp(c.flag)}</td><td>${escp(c.followup)}</td></tr>`).join('');
+  const pageHtml=pages.map((p,pageIndex)=>{
+    const body=p.items.map(item=>{
+      if(item.type==='heading')return `<tr class="location-row"><td colspan="10"><span class="location-title">${escp(item.label)}</span><span class="location-count">${item.count} candidate${item.count===1?'':'s'}${item.continuing?' · continued':''}</span></td></tr>`;
+      const c=item.candidate;
+      return `<tr><td class="n">${item.serial}</td><td>${escp(c.name)}</td><td>${escp([c.age,c.gender].filter(Boolean).join(' / '))}</td><td>${escp(c.phone)}</td><td>${escp([c.location,c.city].filter(Boolean).join(', '))}</td><td>${escp(c.qualification)}</td><td>${escp(c.position)}</td><td>${escp(c.status)}</td><td>${escp(c.flag)}</td><td>${escp(c.followup)}</td></tr>`;
+    }).join('');
     return `<section class="pdf-page">${header}<div class="table-wrap"><table>${colHead}<tbody>${body}</tbody></table></div><div class="report-footer"><span>Page ${pageIndex+1} of ${pages.length}</span><span>Printed on ${escp(printed)}</span><span>Sashi Nair</span></div></section>`;
   }).join('');
+
   const w=window.open('','_blank');if(!w)return toast('Allow pop-ups to export PDF');
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Candidate Hub Report</title><style>
 @page{size:A4 landscape;margin:7mm 7mm 7mm 7mm}
@@ -366,8 +421,11 @@ tr{break-inside:avoid;page-break-inside:avoid}
 th,td{border:1px solid #cfd5df;padding:.75mm .8mm;vertical-align:top;line-height:1.12;overflow-wrap:anywhere;word-break:normal}
 th{background:#eef2f7;font-size:7.5pt;font-weight:700;text-align:left}
 td{font-size:7.8pt}
-th.n,td.n{width:4mm;text-align:center;padding-left:.3mm;padding-right:.3mm}
+th.n,td.n{width:7mm;text-align:center;padding-left:.6mm;padding-right:.6mm;white-space:nowrap;font-variant-numeric:tabular-nums}
 th:nth-child(2){width:34mm}th:nth-child(3){width:21mm}th:nth-child(4){width:24mm}th:nth-child(5){width:39mm}th:nth-child(6){width:35mm}th:nth-child(7){width:34mm}th:nth-child(8){width:30mm}th:nth-child(9){width:18mm}th:nth-child(10){width:24mm}
+.location-row td{background:#e9e5ff;border-top:1.4px solid #7c6ff0;border-bottom:1.4px solid #7c6ff0;padding:1.05mm 1.4mm;color:#3e347f}
+.location-title{font-size:8.4pt;font-weight:800;text-transform:uppercase;letter-spacing:.25px}
+.location-count{float:right;font-size:7.2pt;font-weight:700;color:#655b9f;text-transform:none;letter-spacing:0}
 .report-footer{flex:0 0 7mm;height:7mm;margin-top:2mm;border-top:1px solid #cfd5df;display:grid;grid-template-columns:1fr 1fr 1fr;align-items:end;padding:1.5mm 1mm 0;font-size:8pt;color:#666}
 .report-footer span:first-child{text-align:left}.report-footer span:nth-child(2){text-align:center}.report-footer span:last-child{text-align:right}
 @media print{html,body{width:auto;height:auto}.pdf-page{height:196mm;min-height:196mm;max-height:196mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
