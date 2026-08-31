@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>Candidate Hub</title>
+<!-- Consolidated stable build: 2026-08-31 · based on tested Tweak 14 with Tweak 13 membership behaviour preserved -->
 <meta name="theme-color" content="#7C6FF0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -32,6 +33,22 @@
 html,body{max-width:100%;overflow-x:hidden}#app{width:100%;overflow-x:hidden}.topbar{position:relative;top:auto;background:var(--bg)}.stats-scroll,.filter-scroll,.range-scroll{max-width:100%;min-width:0;overscroll-behavior-x:contain}.filter-scroll{overflow-x:auto}.filter-toggle-row{padding:0 18px 10px}.filter-toggle{width:100%;border:1px solid var(--line);background:var(--surface);color:var(--primary-dark);border-radius:12px;padding:9px 12px;font-size:12px;font-weight:700}.list-controls.collapsed{display:grid}.list-controls.collapsed>.control-select,.list-controls.collapsed>.age-range-control{display:none}
 .scroll-nav{position:fixed;right:22px;bottom:calc(154px + var(--safe-b));z-index:29;display:flex;flex-direction:column;gap:8px;opacity:0;pointer-events:none;transition:opacity .2s}.scroll-nav.show{opacity:.92;pointer-events:auto}.scroll-jump{width:44px;height:44px;border:1px solid var(--line);border-radius:50%;background:rgba(255,255,255,.94);color:var(--primary-dark);box-shadow:var(--shadow-card);font-size:20px;font-weight:800}.load-more-panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px;margin:4px 0 18px;text-align:center}.load-more-panel p{margin:0 0 9px;font-size:12px;color:var(--ink-soft)}.load-more-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.load-more-actions button{border:1px solid var(--line);border-radius:999px;background:var(--surface-2);color:var(--primary-dark);padding:10px;font-weight:700}
 .scroll-jump.hidden{visibility:hidden;pointer-events:none}
+
+/* Final v2: compact status/priority filter strip — wraps, no horizontal scrolling */
+#filterScroll{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  overflow-x:visible;
+  white-space:normal;
+  padding-bottom:2px;
+}
+#filterScroll .chip{
+  flex:0 0 auto;
+  max-width:100%;
+  white-space:nowrap;
+}
+
 </style>
 </head>
 <body>
@@ -54,7 +71,7 @@ html,body{max-width:100%;overflow-x:hidden}#app{width:100%;overflow-x:hidden}.to
     <select class="control-select" id="sortMode" onchange="setListControl('sort',this.value)">
       <option value="newest">↕ Newest added</option><option value="oldest">Oldest added</option><option value="nameAsc">Name A → Z</option><option value="nameDesc">Name Z → A</option><option value="ageAsc">Age: youngest first</option><option value="ageDesc">Age: oldest first</option><option value="qualification">Qualification A → Z</option><option value="location">Location A → Z</option><option value="followupAsc">Follow-up soonest</option><option value="priority">Priority: Hot first</option><option value="status">Pipeline stage</option>
     </select>
-    <div class="filter-meta"><span id="filterMeta">Showing 0 candidates</span><button class="clear-filters" id="clearFiltersBtn" onclick="clearListFilters()">Clear filters</button></div><div class="list-tools"><button class="chip" onclick="toggleSelectionMode()" id="selectionModeBtn">☑ Select</button><button class="chip" onclick="exportCandidatePDF()">📄 PDF</button><button class="chip" onclick="openListMore()">••• More</button></div><div class="selection-tools" id="selectionTools"><button class="chip" onclick="toggleSelectVisible()" id="selectVisibleBtn">☑ Select all visible</button><button class="chip" onclick="clearCandidateSelection()" id="clearSelectionBtn">Clear selection</button></div>
+    <div class="filter-meta"><span id="filterMeta">Showing 0 candidates</span><button class="clear-filters" id="clearFiltersBtn" onclick="clearListFilters()">Clear filters</button></div><div class="list-tools"><button class="chip" onclick="toggleSelectionMode()" id="selectionModeBtn">☑ Select</button><button class="chip" onclick="exportCandidatePDF()">📄 PDF</button><button class="chip" onclick="openListMore()">••• More</button></div><div class="selection-tools" id="selectionTools"><button class="chip" onclick="toggleSelectVisible()" id="selectVisibleBtn">☑ Select all visible</button><button class="chip" onclick="openExportCleanupPreview()" id="exportCleanupBtn">⬆ Excel / Clean</button></div>
   </div>
 </div>
 <div class="category-strip" id="categoryStrip"></div><div id="listView"></div>
@@ -164,7 +181,7 @@ const STAGE_PALETTE=[{bg:"var(--grey-light)",fg:"#6b6690"},{bg:"var(--blue-light
 const FLAG_META={Hot:{emoji:"🔥",color:"var(--red)"},Warm:{emoji:"🌤️",color:"var(--amber)"},Cold:{emoji:"❄️",color:"var(--blue)"},None:{emoji:"",color:"var(--grey)"}};
 const AVATAR_COLORS=["#7C6FF0","#FF6F91","#4FA6FF","#2FCBA6","#FFB648","#B47CE0"];
 const EXPORT_COLS=["name","phone","whatsapp","age","city","location","zone","gender","qualification","position","expType","expYears","source","salary","flag","status","followup","resume","notes","referralPool","referralAdvisor","referralCustomer","shareConsent","referralNotes","realEstateOutcome","categories"];
-const DEFAULT_PEOPLE_CATEGORIES=[{id:"candidate",name:"Candidates"},{id:"buyer",name:"Buyers"},{id:"insurance",name:"Insurance/Referral"},{id:"cat4",name:"Category 4"},{id:"cat5",name:"Category 5"}];
+const DEFAULT_PEOPLE_CATEGORIES=[{id:"candidate",name:"Candidates"},{id:"buyer",name:"Buyers"},{id:"insurance",name:"Insurance/Referral"},{id:"cat4",name:"Purged"},{id:"cat5",name:"Category 5"}];
 let PEOPLE_CATEGORIES=[],ALL_PEOPLE_NAME="All People",activePeopleCategory="candidate";
 const IMPORT_TEMPLATE_COLS=["name","phone","whatsapp","age","city","location","gender","qualification","position","expType","expYears","source","salary","flag","status","followup","resume","notes","referralPool","referralAdvisor","referralCustomer","shareConsent","referralNotes"];
 let candidates=[],STAGES=DEFAULT_STAGES.slice(),activeFilter="all",activeRange="today",currentTab="list",db=null,auth=null,unsubscribe=null,useFirebase=false,pendingImport=[],pendingExportType="csv",pendingDupAction="skip",locationFilter="",sourceFilter="",qualificationFilter="",genderFilter="",ageFilter="",positionFilter="",expFilter="",sortMode="newest",referralOpportunityFilter="all",referralConsentFilter="all",selectedCandidateIds=new Set(),selectionMode=false,displayedLimit=50,formReturnPosition=null;
@@ -262,7 +279,43 @@ function updateSyncUI(on){$("syncPill").className="sync-pill "+(on?"on":"off");$
 function goTab(tab){currentTab=tab;["list","referral","report","insights","settings"].forEach(t=>$(t+"View").style.display=t===tab?"block":"none");$("listSearch").style.display=tab==="list"?"block":"none";$("statsScroll").style.display=tab==="list"?"flex":"none";$("filterScroll").style.display=tab==="list"?"flex":"none";$("listControls").style.display=tab==="list"?"":"none";$("filterToggleBtn").parentElement.style.display=tab==="list"?"block":"none";$("fabAdd").style.display=tab==="list"?"flex":"none";["List","Referral","Report","Insights","Settings"].forEach(n=>$("nav"+n).classList.toggle("active",n.toLowerCase()===tab));if(tab==="referral")renderReferralView();if(tab==="report")renderReport();if(tab==="insights")renderInsights();window.scrollTo(0,0)}
 function render(){if(!useFirebase)saveLocal();renderStats();renderCategoryStrip();renderList();renderStagesSettings();renderCategoryManager();if(currentTab==="referral")renderReferralView();if(currentTab==="report")renderReport();if(currentTab==="insights")renderInsights()}
 function populateStatusSelect(){const sel=$("fStatus");if(!sel)return;const cur=sel.value;sel.innerHTML=STAGES.map(s=>`<option ${s===cur?"selected":""}>${escapeHtml(s)}</option>`).join("")}
-function buildFilterChips(){const items=[["all","All"],["flag:Hot","🔥 Hot"],["flag:Warm","🌤️ Warm"],["flag:Cold","❄️ Cold"],...STAGES.map(s=>["status:"+s,s])];$("filterScroll").innerHTML=items.map(([v,l])=>`<button class="chip${activeFilter===v?" active":""}" onclick="setFilter('${String(v).replace(/'/g,"\\'")}')">${escapeHtml(l)}</button>`).join("")}
+function buildFilterChips(){
+  const shortLabel={
+    "all":"All",
+    "Hot":"🔥 Hot",
+    "Warm":"🌤️ Warm",
+    "Cold":"❄️ Cold",
+    "New":"New",
+    "Talked":"Talked",
+    "Interview Scheduled":"Interview",
+    "Training":"Training",
+    "Regular Attendance":"Regular",
+    "Joined":"Joined",
+    "On Hold":"Hold",
+    "Not Selected":"Not Sel."
+  };
+  const fullLabel={
+    "all":"All",
+    "Hot":"🔥 Hot",
+    "Warm":"🌤️ Warm",
+    "Cold":"❄️ Cold",
+    "New":"New",
+    "Talked":"Talked",
+    "Interview Scheduled":"Interview Scheduled",
+    "Training":"Training",
+    "Regular Attendance":"Regular Attendance",
+    "Joined":"Joined",
+    "On Hold":"On Hold",
+    "Not Selected":"Not Selected"
+  };
+  const items=[["all","All"],["Hot","🔥 Hot"],["Warm","🌤️ Warm"],["Cold","❄️ Cold"],...STAGES.map(s=>[s,s])];
+  $("filterScroll").innerHTML=items.map(([v])=>{
+    const active=activeFilter===v;
+    const shown=active?(fullLabel[v]||v):(shortLabel[v]||v);
+    const tip=fullLabel[v]||v;
+    return `<button class="chip${active?" active":""}" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}" onclick="setFilter('${String(v).replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')">${escapeHtml(shown)}</button>`;
+  }).join("");
+}
 function setFilter(v){activeFilter=v;displayedLimit=50;buildFilterChips();renderList()}
 function activeCriteriaCount(){return [locationFilter,sourceFilter,qualificationFilter,genderFilter,ageFilter,positionFilter,expFilter].filter(Boolean).length+(sortMode!=="newest"?1:0)}
 function updateFilterToggle(){const panel=$("listControls"),btn=$("filterToggleBtn");if(!panel||!btn)return;const n=activeCriteriaCount();btn.textContent=(panel.classList.contains("collapsed")?"☰ Show filters":"▲ Hide filters")+(n?` (${n} active)`:"")}
@@ -333,7 +386,7 @@ function cardHtml(c){
 function openFieldPicker(){const labels={name:'Name',location:'Location',gender:'Gender',age:'Age',phone:'Phone',whatsapp:'WhatsApp',notes:'Notes',qualification:'Qualification',position:'Position',experience:'Experience',source:'Source',salary:'Expected salary',priority:'Priority',status:'Status',followup:'Follow-up',resume:'Resume'};$('previewTitle').textContent='Visible fields';$('previewBody').innerHTML=`<p class="mini">Choose what appears on candidate cards. Your choice is remembered on this device. No candidate data is deleted.</p><div class="field-picker">${CARD_FIELDS.map(k=>`<label class="field-pick"><input type="checkbox" value="${k}" ${fieldOn(k)?'checked':''}> ${labels[k]}</label>`).join('')}</div><div class="btn-row" style="margin-top:14px"><button class="btn btn-ghost" onclick="resetVisibleFields()">Mobile defaults</button><button class="btn btn-primary" onclick="saveVisibleFields()">Save</button></div>`;showPreview()}
 function saveVisibleFields(){const picked=[...$('previewBody').querySelectorAll('.field-picker input:checked')].map(x=>x.value);if(!picked.length)return toast('Keep at least one visible field');visibleFields=picked;localStorage.setItem('chVisibleFields',JSON.stringify(visibleFields));closePreview();renderList();toast('Visible fields saved')}
 function resetVisibleFields(){visibleFields=DEFAULT_CARD_FIELDS.slice();localStorage.setItem('chVisibleFields',JSON.stringify(visibleFields));closePreview();renderList();toast('Mobile defaults restored')}
-function openListMore(){$('previewTitle').textContent='More tools';$('previewBody').innerHTML=`<p class="mini">Additional candidate-list tools.</p><div class="more-tools"><button class="btn btn-ghost" onclick="closePreview();openFieldPicker()">☑ Visible fields</button><button class="btn btn-ghost" onclick="closePreview();startCallMode()">📞 Call mode</button></div>`;showPreview()}
+function openListMore(){$('previewTitle').textContent='More tools';$('previewBody').innerHTML=`<p class="mini">Additional candidate-list tools.</p><div class="more-tools"><button class="btn btn-ghost" onclick="closePreview();openFieldPicker()">☑ Visible fields</button><button class="btn btn-ghost" onclick="closePreview();startCallMode()">📞 Call mode</button><button class="btn btn-ghost" onclick="closePreview();openExportCleanupPreview()">⬆ Excel archive / clean</button></div>`;showPreview()}
 function startCallMode(){callQueue=filteredCandidates().slice();if(!callQueue.length)return toast('No candidates in the current filter');callIndex=0;callOutcome='';renderCallMode();showPreview()}
 function renderCallMode(){if(!callQueue.length){closePreview();return}callIndex=Math.max(0,Math.min(callIndex,callQueue.length-1));const c=callQueue[callIndex];$('previewTitle').textContent='Call mode';$('previewBody').innerHTML=`<div class="call-card"><div class="call-head"><div><p class="call-name">${escapeHtml(c.name||'Unnamed')}</p><div class="call-details">${escapeHtml([c.location,c.gender,c.age?c.age+' yrs':''].filter(Boolean).join(' · '))}</div></div><div class="call-count">${callIndex+1} of ${callQueue.length}</div></div><div class="call-actions"><a class="btn btn-primary" href="tel:${String(c.phone||'').replace(/\s/g,'')}" onclick="logInteraction('${c.id}','call')">☎ Call ${escapeHtml(c.phone||'')}</a><a class="btn btn-ghost" href="${waLink(c.whatsapp||c.phone,c.name)}" target="_blank" onclick="logInteraction('${c.id}','whatsapp')">💬 WhatsApp</a></div><div class="field"><label>Call outcome</label><div class="outcome-grid">${['Interested','Call Back','No Answer','Not Interested','Not Qualified'].map(v=>`<button type="button" class="${callOutcome===v?'active':''}" onclick="setCallOutcome('${v}')">${v}</button>`).join('')}</div></div><div class="field"><label>Notes</label><textarea id="callNote" rows="3" placeholder="Record what was discussed / next action"></textarea></div><div class="activity-box" style="margin-top:10px"><label class="check-row"><input id="callReferral" type="checkbox" ${c.referralPool?'checked':''}> Add to other opportunities</label><div class="grid2"><label class="check-row"><input id="callAdvisor" type="checkbox" ${c.referralAdvisor?'checked':''}> Recruitment opportunity</label><label class="check-row"><input id="callCustomer" type="checkbox" ${c.referralCustomer?'checked':''}> Customer opportunity</label></div><div class="field"><label>Consent to share contact details</label><select id="callConsent"><option ${c.shareConsent==='Not asked'?'selected':''}>Not asked</option><option ${c.shareConsent==='Consented'?'selected':''}>Consented</option><option ${c.shareConsent==='Declined'?'selected':''}>Declined</option></select></div></div><div class="btn-row"><button class="btn btn-ghost" onclick="callPrev()" ${callIndex===0?'disabled':''}>← Previous</button><button class="btn btn-primary" onclick="saveCallAndNext()">${callIndex===callQueue.length-1?'Save & Finish':'Save & Next →'}</button></div><button class="btn btn-ghost" style="margin-top:8px" onclick="callNextWithoutSave()">Skip / Next</button></div>`}
 function setCallOutcome(v){callOutcome=v;document.querySelectorAll('.outcome-grid button').forEach(b=>b.classList.toggle('active',b.textContent.trim()===v));if((v==='Not Interested'||v==='Not Qualified')&&$('callReferral'))$('callReferral').checked=true}
@@ -351,7 +404,7 @@ function toggleSelectionMode(){selectionMode=!selectionMode;if(!selectionMode)se
 function toggleCandidateSelection(id,on){if(on)selectedCandidateIds.add(id);else selectedCandidateIds.delete(id);updateSelectionUI()}
 function clearCandidateSelection(){selectedCandidateIds.clear();renderList()}
 function toggleSelectVisible(){const visible=filteredCandidates();if(!visible.length)return toast("No candidates in current filter");const all=visible.every(c=>selectedCandidateIds.has(c.id));visible.forEach(c=>all?selectedCandidateIds.delete(c.id):selectedCandidateIds.add(c.id));renderList()}
-function updateSelectionUI(){const visible=filteredCandidates(),sel=selectedCandidateIds.size,meta=$("filterMeta"),btn=$("selectVisibleBtn"),clear=$("clearSelectionBtn"),modeBtn=$("selectionModeBtn"),tools=$("selectionTools");if(meta)meta.textContent=`Showing ${visible.length} of ${candidates.filter(c=>personInCategory(c,activePeopleCategory)).length} ${categoryName(activePeopleCategory)}${candidates.filter(c=>personInCategory(c,activePeopleCategory)).length===1?"":""}${sel?` · ${sel} selected`:""}`;if(btn)btn.textContent=visible.length&&visible.every(c=>selectedCandidateIds.has(c.id))?"☐ Deselect visible":"☑ Select all visible";if(clear)clear.disabled=!sel;if(modeBtn){modeBtn.textContent=selectionMode?"✕ Done":"☑ Select";modeBtn.classList.toggle("active",selectionMode)}if(tools)tools.classList.toggle("on",selectionMode)}
+function updateSelectionUI(){const visible=filteredCandidates(),sel=selectedCandidateIds.size,meta=$("filterMeta"),btn=$("selectVisibleBtn"),archive=$("exportCleanupBtn"),modeBtn=$("selectionModeBtn"),tools=$("selectionTools");if(meta)meta.textContent=`Showing ${visible.length} of ${candidates.filter(c=>personInCategory(c,activePeopleCategory)).length} ${categoryName(activePeopleCategory)}${sel?` · ${sel} selected`:""}`;if(btn)btn.textContent=visible.length&&visible.every(c=>selectedCandidateIds.has(c.id))?"☐ Deselect all visible":"☑ Select all visible";if(archive){archive.disabled=!visible.length&&!sel;archive.textContent=sel?`⬆ Excel / Clean (${sel})`:"⬆ Excel / Clean"}if(modeBtn){modeBtn.textContent=selectionMode?"✕ Done":"☑ Select";modeBtn.classList.toggle("active",selectionMode)}if(tools)tools.classList.toggle("on",selectionMode)}
 function pdfFilterSummary(){const bits=[];const q=$("searchInput")?.value.trim();if(q)bits.push(`Search: ${q}`);if(activeFilter!=="all")bits.push(`View: ${activeFilter.replace(/^flag:|^status:/,"")}`);if(locationFilter)bits.push(`Location: ${locationFilter}`);if(sourceFilter)bits.push(`Source: ${sourceFilter}`);if(qualificationFilter)bits.push(`Qualification: ${qualificationFilter}`);if(genderFilter)bits.push(`Gender: ${genderFilter}`);if(ageFilter)bits.push(ageFilterLabel());if(positionFilter)bits.push(`Position: ${positionFilter}`);if(expFilter)bits.push(`Experience: ${expFilter}`);return bits.length?bits.join(" · "):"All active candidates"}
 function exportCandidatePDF(){
   const selected=candidates.filter(c=>selectedCandidateIds.has(c.id));
@@ -940,12 +993,57 @@ async function restoreBackupMerge(){const payload=window.pendingBackupRestore,ro
 function handleImportFile(e){const file=e.target.files[0];if(!file)return;const n=file.name.toLowerCase(),r=new FileReader();if(n.endsWith(".json")){r.onload=()=>{try{const p=JSON.parse(r.result);if(p&&Array.isArray(p.candidates))openBackupRestorePreview(p,file.name);else prepareImport(Array.isArray(p)?p:[p])}catch(err){console.error(err);toast("Invalid JSON backup")}finally{e.target.value=""}};r.readAsText(file)}else if(n.endsWith(".xlsx")||n.endsWith(".xls")){r.onload=()=>{try{if(typeof XLSX==='undefined')throw new Error('Excel library did not load');const wb=XLSX.read(new Uint8Array(r.result),{type:"array"});prepareImport(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:"",raw:false}))}catch(err){console.error(err);toast("Couldn't read Excel")}finally{e.target.value=""}};r.readAsArrayBuffer(file)}else{r.onload=()=>{try{prepareImport(parseCSV(r.result))}catch(err){console.error(err);toast("Couldn't read CSV")}finally{e.target.value=""}};r.readAsText(file)}}
 function parseCSV(text){const rows=[];let row=[],cur="",q=false;for(let i=0;i<text.length;i++){const ch=text[i];if(q){if(ch==='"'&&text[i+1]==='"'){cur+='"';i++}else if(ch==='"')q=false;else cur+=ch}else{if(ch==='"')q=true;else if(ch===','){row.push(cur);cur=""}else if(ch==='\n'){row.push(cur);rows.push(row);row=[];cur=""}else if(ch!=='\r')cur+=ch}}if(cur||row.length){row.push(cur);rows.push(row)}const headers=(rows.shift()||[]).map(canonicalKey);return rows.filter(r=>r.some(v=>String(v).trim())).map(r=>Object.fromEntries(headers.map((h,i)=>[h,r[i]??""])))}
 
+let cleanupExportIds=[],cleanupExportDownloaded=false;
+function selectionOrFilteredRows(){
+  const visible=filteredCandidates();
+  if(selectedCandidateIds.size){
+    const visibleIds=new Set(visible.map(c=>c.id));
+    return candidates.filter(c=>selectedCandidateIds.has(c.id)&&visibleIds.has(c.id));
+  }
+  return visible;
+}
+function exportArchiveFilename(){
+  const d=new Date(),p=n=>String(n).padStart(2,'0');
+  const stamp=`${String(d.getFullYear()).slice(-2)}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+  const cat=String(categoryName(activePeopleCategory)||'people').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'people';
+  return `candidate_hub_${cat}_archive_${stamp}.xlsx`;
+}
+function openExportCleanupPreview(){
+  const rows=selectionOrFilteredRows();
+  if(!rows.length)return toast('No selected / filtered people to export');
+  cleanupExportIds=rows.map(c=>c.id);cleanupExportDownloaded=false;
+  const scope=selectedCandidateIds.size?`${rows.length} selected`:`${rows.length} filtered / visible`;
+  $('previewTitle').textContent='Excel archive / clean';
+  $('previewBody').innerHTML=`<p class="mini"><b>${scope}</b> record(s) are ready. Download the Excel archive first. Permanent cleanup becomes available only after the download is started.</p><div class="preview-scroll"><table class="preview-table"><thead><tr><th>Name</th><th>Phone</th><th>Age</th><th>Category</th></tr></thead><tbody>${rows.slice(0,20).map(c=>`<tr><td>${escapeHtml(c.name||'')}</td><td>${escapeHtml(c.phone||'')}</td><td>${c.age??''}</td><td>${escapeHtml(personCategories(c).map(categoryName).join(', '))}</td></tr>`).join('')}</tbody></table></div>${rows.length>20?`<p class="mini">Showing first 20 of ${rows.length}.</p>`:''}<div class="btn-row"><button class="btn btn-ghost" onclick="closePreview()">Cancel</button><button class="btn btn-primary" onclick="downloadArchiveForCleanup()">⬆ Download Excel archive</button></div><div id="cleanupAfterExport"></div>`;
+  showPreview();
+}
+function downloadArchiveForCleanup(){
+  const ids=new Set(cleanupExportIds),rows=candidates.filter(c=>ids.has(c.id));
+  if(!rows.length)return toast('Records are no longer available');
+  downloadXLSX(rows,exportArchiveFilename());
+  cleanupExportDownloaded=true;
+  const box=$('cleanupAfterExport');
+  if(box)box.innerHTML=`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><p class="mini"><b>Optional permanent cleanup</b><br>Purged is safer when you want to keep duplicate protection. Use permanent delete only for records you truly want removed from the Hub.</p><div class="field"><label>Type DELETE to permanently remove these ${rows.length} exported record(s)</label><input id="cleanupConfirmText" autocomplete="off" placeholder="DELETE" oninput="updateCleanupDeleteButton()"></div><button class="btn btn-danger" id="cleanupDeleteBtn" disabled onclick="deleteExportedRecords()">Delete exported records permanently</button></div>`;
+  toast('Excel archive download started');
+}
+function updateCleanupDeleteButton(){const b=$('cleanupDeleteBtn'),v=$('cleanupConfirmText');if(b)b.disabled=!cleanupExportDownloaded||String(v?.value||'').trim()!=='DELETE'}
+async function deleteExportedRecords(){
+  if(!cleanupExportDownloaded||String($('cleanupConfirmText')?.value||'').trim()!=='DELETE')return toast('Type DELETE exactly');
+  const ids=[...new Set(cleanupExportIds)].filter(Boolean);if(!ids.length)return toast('Nothing selected');
+  try{
+    if(useFirebase){
+      for(let i=0;i<ids.length;i+=400){const batch=db.batch();ids.slice(i,i+400).forEach(id=>batch.delete(db.collection('candidates').doc(id)));await batch.commit()}
+      candidates=candidates.filter(c=>!ids.includes(c.id));saveLocal();
+    }else{candidates=candidates.filter(c=>!ids.includes(c.id));saveLocal();render()}
+    ids.forEach(id=>selectedCandidateIds.delete(id));cleanupExportIds=[];cleanupExportDownloaded=false;closePreview();render();toast(`${ids.length} exported record(s) permanently deleted`)
+  }catch(e){console.error(e);toast('Delete failed: '+(e.message||e))}
+}
 function currentExportRows(){return currentTab==="list"?filteredCandidates():candidates}
 function openExportPreview(type){pendingExportType=type;const rows=currentExportRows();if(!rows.length)return toast("No candidates to export");$("previewTitle").textContent="Export preview";$("previewBody").innerHTML=`<p class="mini"><b>${rows.length}</b> candidate(s) will be exported. ${currentTab==="list"?"Current search/filter is respected.":"All candidates will be exported."}</p><div class="preview-scroll"><table class="preview-table"><thead><tr><th>Name</th><th>Phone</th><th>Status</th><th>Location</th></tr></thead><tbody>${rows.slice(0,12).map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.phone)}</td><td>${escapeHtml(c.status)}</td><td>${escapeHtml(c.location)}</td></tr>`).join("")}</tbody></table></div><div class="btn-row"><button class="btn btn-ghost" onclick="closePreview()">Cancel</button><button class="btn btn-primary" onclick="confirmExport()">Download ${type.toUpperCase()}</button></div>`;showPreview()}
 function confirmExport(){const rows=currentExportRows();if(pendingExportType==="csv")downloadCSV(rows);else if(pendingExportType==="xlsx")downloadXLSX(rows);else downloadJSON(rows);closePreview()}
 function csvCell(v){v=String(v??"");return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}
 function downloadCSV(rows){const txt=[EXPORT_COLS.join(","),...rows.map(c=>EXPORT_COLS.map(k=>csvCell(c[k])).join(","))].join("\r\n");downloadBlob(new Blob([txt],{type:"text/csv;charset=utf-8"}),"candidates.csv")}
-function downloadXLSX(rows){const data=rows.map(c=>Object.fromEntries(EXPORT_COLS.map(k=>[k,c[k]??""])));const ws=XLSX.utils.json_to_sheet(data,{header:EXPORT_COLS}),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Candidates");XLSX.writeFile(wb,"candidates.xlsx")}
+function downloadXLSX(rows,filename="candidates.xlsx"){const data=rows.map(c=>Object.fromEntries(EXPORT_COLS.map(k=>[k,Array.isArray(c[k])?c[k].join(" | "):(c[k]??"")])));const ws=XLSX.utils.json_to_sheet(data,{header:EXPORT_COLS}),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Candidates");XLSX.writeFile(wb,filename)}
 function fileTimestamp(d=new Date()){const p=n=>String(n).padStart(2,'0');return String(d.getFullYear()).slice(-2)+p(d.getMonth()+1)+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes())}
 function downloadJSON(rows){const payload={version:2,exportedAt:new Date().toISOString(),stages:STAGES,candidates:rows};const scope=rows.length===candidates.length?'all':'filtered';downloadBlob(new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),`candidate_hub_backup_${scope}_${fileTimestamp()}.json`)}
 function downloadBlob(blob,name){const a=document.createElement("a"),u=URL.createObjectURL(blob);a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
