@@ -6,10 +6,13 @@
 <title>Candidate Hub</title>
 <!-- Consolidated stable build: 2026-08-31 · based on tested Tweak 14 with Tweak 13 membership behaviour preserved -->
 <meta name="theme-color" content="#7C6FF0">
+<meta name="description" content="Candidate tracking, follow-ups, reports and secure local backups for Team SR Nair.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="CandHub">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%237C6FF0'/%3E%3Ctext x='50' y='68' font-size='58' text-anchor='middle' fill='white' font-family='Arial'%3EC%3C/text%3E%3C/svg%3E">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js?v=2"></script>
@@ -47,6 +50,16 @@ html,body{max-width:100%;overflow-x:hidden}#app{width:100%;overflow-x:hidden}.to
   flex:0 0 auto;
   max-width:100%;
   white-space:nowrap;
+}
+
+/* Realme Pad / Android tablet: use the available width while keeping forms readable. */
+@media (min-width:700px){
+  #app,.bottomnav,.sheet{max-width:760px}
+  .topbar,.searchwrap,.stats-scroll,.filter-scroll,.filter-toggle-row,.list-controls,#listView,#reportView,#insightsView,#settingsView{padding-left:24px;padding-right:24px}
+  .sheet{left:50%;right:auto;width:min(720px,calc(100% - 32px));transform:translate(-50%,100%)}
+  .sheet.show{transform:translate(-50%,0)}
+  .fab{right:max(24px,calc((100vw - 760px)/2 + 24px))}
+  .scroll-nav{right:max(26px,calc((100vw - 760px)/2 + 26px))}
 }
 
 
@@ -117,6 +130,11 @@ html,body{max-width:100%;overflow-x:hidden}#app{width:100%;overflow-x:hidden}.to
 <div id="reportView"><div class="range-scroll" id="rangeScroll"></div><div id="reportList"></div></div>
 <div id="insightsView"><div class="section-title">Pipeline by stage</div><div class="panel" id="stagePanel"></div><div class="section-title">Temperature</div><div class="panel" id="flagPanel"></div><div class="section-title">Fresher vs Experienced</div><div class="panel" id="expPanel"></div></div>
 <div id="settingsView">
+  <div class="section-title">Install on this device</div>
+  <div class="panel">
+    <p class="mini" id="pwaInstallStatus">Install Candidate Hub for a full-screen app icon and quicker opening on Android.</p>
+    <div class="btn-row"><button class="btn btn-primary" id="pwaInstallBtn" type="button" onclick="installCandidateHub()">📲 Install Candidate Hub</button></div>
+  </div>
   <div class="section-title">Sync across devices</div>
   <div class="panel">
     <p class="mini">Firebase is optional. Without it, data remains in this browser.</p>
@@ -1137,6 +1155,26 @@ function downloadImportTemplate(){
 function showPreview(){$("previewOverlay").classList.add("show");$("previewSheet").classList.add("show")}function closePreview(){$("previewOverlay").classList.remove("show");$("previewSheet").classList.remove("show")}
 async function clearAllData(){if(!confirm("Delete ALL candidates permanently?"))return;if(!confirm("This cannot be undone. Continue?"))return;if(useFirebase){const snap=await db.collection("candidates").get();for(let i=0;i<snap.docs.length;i+=400){const b=db.batch();snap.docs.slice(i,i+400).forEach(d=>b.delete(d.ref));await b.commit()}}else{candidates=[];render()}toast("All candidates deleted")}
 function toast(msg){const t=document.createElement("div");t.className="toast";t.textContent=msg;$("toastWrap").appendChild(t);requestAnimationFrame(()=>t.classList.add("show"));setTimeout(()=>{t.classList.remove("show");setTimeout(()=>t.remove(),300)},2600)}
+
+/* PWA install and offline app-shell support. */
+let deferredInstallPrompt=null;
+function updatePwaInstallUI(){
+  const installed=window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+  const btn=document.getElementById('pwaInstallBtn');
+  const status=document.getElementById('pwaInstallStatus');
+  if(installed){if(btn)btn.style.display='none';if(status)status.textContent='Candidate Hub is installed on this device.'}
+}
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstallPrompt=event;updatePwaInstallUI()});
+async function installCandidateHub(){
+  if(window.matchMedia('(display-mode: standalone)').matches){toast('Candidate Hub is already installed');return}
+  if(!deferredInstallPrompt){toast('In Chrome, tap ⋮ then “Install app” or “Add to Home screen”');return}
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt=null;
+}
+window.addEventListener('appinstalled',()=>{deferredInstallPrompt=null;updatePwaInstallUI();toast('Candidate Hub installed')});
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(err=>console.error('Service worker registration failed',err)))}
+updatePwaInstallUI();
 </script>
 </body>
 </html>
