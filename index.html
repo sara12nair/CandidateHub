@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>Candidate Hub</title>
-<!-- Consolidated stable build: 2026-08-31 · based on tested Tweak 14 with Tweak 13 membership behaviour preserved -->
+<!-- CH Tweaked 2609_10_1747 · editable recruitment-source master with safe migration and reporting -->
 <meta name="theme-color" content="#7C6FF0">
 <meta name="description" content="Candidate tracking, follow-ups, reports and secure local backups for Team SR Nair.">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -128,7 +128,7 @@ html,body{max-width:100%;overflow-x:hidden}#app{width:100%;overflow-x:hidden}.to
   <div id="referralList"></div>
 </div>
 <div id="reportView"><div class="range-scroll" id="rangeScroll"></div><div id="reportList"></div></div>
-<div id="insightsView"><div class="section-title">Pipeline by stage</div><div class="panel" id="stagePanel"></div><div class="section-title">Temperature</div><div class="panel" id="flagPanel"></div><div class="section-title">Fresher vs Experienced</div><div class="panel" id="expPanel"></div></div>
+<div id="insightsView"><div class="section-title">Pipeline by stage</div><div class="panel" id="stagePanel"></div><div class="section-title">Temperature</div><div class="panel" id="flagPanel"></div><div class="section-title">Fresher vs Experienced</div><div class="panel" id="expPanel"></div><div class="section-title">Source performance</div><div class="panel" id="sourcePerformancePanel"></div></div>
 <div id="settingsView">
   <div class="section-title">Install on this device</div>
   <div class="panel">
@@ -142,6 +142,7 @@ html,body{max-width:100%;overflow-x:hidden}#app{width:100%;overflow-x:hidden}.to
     <div class="btn-row"><button class="btn btn-primary" onclick="connectFirebase()">Connect & sync</button></div><div class="btn-row" id="disconnectRow" style="display:none"><button class="btn btn-ghost" onclick="disconnectFirebase()">Disconnect sync</button></div>
   </div>
   <div class="section-title">People categories</div><div class="panel"><p class="mini">Rename categories freely. One person can belong to more than one category. “All People” is the combined view and is also renamable.</p><div id="categoryManager"></div><div class="btn-row"><button class="btn btn-ghost" onclick="addPeopleCategory()">+ Add category</button></div></div>
+  <div class="section-title">Recruitment sources</div><div class="panel"><p class="mini">Add, rename, merge or archive sources. Renaming or merging safely updates candidates already using that source.</p><div id="sourceManager"></div><div class="btn-row"><button class="btn btn-primary" onclick="addSourceFromSettings()">+ Add source</button></div></div>
   <div class="section-title">Pipeline stages</div><div class="panel"><div id="stageList"></div><div class="btn-row"><input id="newStageInput" style="flex:1;padding:10px;border:1px solid var(--line);border-radius:10px" placeholder="New stage"><button class="btn btn-primary" style="width:auto" onclick="addStage()">Add</button></div></div>
   <div class="section-title">Backup & transfer</div>
   <div class="panel">
@@ -181,7 +182,7 @@ html,body{max-width:100%;overflow-x:hidden}#app{width:100%;overflow-x:hidden}.to
 <div class="field"><label>Lists / categories</label><div class="category-checks" id="formCategoryChecks"></div><div class="mini" style="margin-top:5px">A person may be in several lists at the same time.</div></div>
 <div class="field"><label>Experience</label><div class="segmented"><button type="button" data-val="Fresher" class="active" onclick="setExpType(this)">Fresher</button><button type="button" data-val="Experienced" onclick="setExpType(this)">Experienced</button></div></div>
 <div class="field" id="expYearsField" style="display:none"><label>Years of experience</label><input id="fExpYears" type="number"></div>
-<div class="grid2"><div class="field"><label>Source</label><select id="fSource"><option value="">Select</option><option>Referral</option><option>Naukri</option><option>LinkedIn</option><option>Walk-in</option><option>Consultancy</option><option>Newspaper</option><option>Other</option></select></div><div class="field"><label>Expected salary</label><input id="fSalary"></div></div>
+<div class="grid2"><div class="field"><label>Source</label><select id="fSource"><option value="">Select</option></select><button type="button" class="clear-filters" style="margin-top:7px" onclick="quickAddSource()">+ Add source</button></div><div class="field"><label>Expected salary</label><input id="fSalary"></div></div>
 <div class="field"><label>Priority flag</label><div class="segmented"><button type="button" data-val="Hot" onclick="setFlag(this)">🔥 Hot</button><button type="button" data-val="Warm" onclick="setFlag(this)">🌤️ Warm</button><button type="button" data-val="Cold" onclick="setFlag(this)">❄️ Cold</button></div></div>
 <div class="grid2"><div class="field"><label>Status</label><select id="fStatus"></select></div><div class="field"><label>Next follow-up</label><input id="fFollowup" type="date"></div></div>
 <div class="field"><label>Resume link</label><input id="fResume"></div><div class="field"><label>General notes</label><textarea id="fNotes" rows="3" placeholder="Current summary / important information"></textarea></div>
@@ -206,22 +207,25 @@ html,body{max-width:100%;overflow-x:hidden}#app{width:100%;overflow-x:hidden}.to
 
 <script>
 const DEFAULT_STAGES=["New","Talked","Interview Scheduled","Training","Regular Attendance","Joined","On Hold","Not Selected"];
+const DEFAULT_SOURCES=["Referral","Naukri","LinkedIn","Walk-in","Consultancy","Newspaper","Other"];
 const STAGE_PALETTE=[{bg:"var(--grey-light)",fg:"#6b6690"},{bg:"var(--blue-light)",fg:"#2D7FE0"},{bg:"#EFE6FF",fg:"#7C4FE0"},{bg:"var(--amber-light)",fg:"#B4790A"},{bg:"#E6F7F5",fg:"#0E9C8C"},{bg:"var(--mint-light)",fg:"#1CA37E"},{bg:"#FFEFE0",fg:"#C4700F"},{bg:"var(--red-light)",fg:"#D62828"}];
 const FLAG_META={Hot:{emoji:"🔥",color:"var(--red)"},Warm:{emoji:"🌤️",color:"var(--amber)"},Cold:{emoji:"❄️",color:"var(--blue)"},None:{emoji:"",color:"var(--grey)"}};
 const AVATAR_COLORS=["#7C6FF0","#FF6F91","#4FA6FF","#2FCBA6","#FFB648","#B47CE0"];
 const EXPORT_COLS=["name","phone","whatsapp","age","city","location","zone","gender","qualification","position","expType","expYears","source","salary","flag","status","followup","resume","notes","referralPool","referralAdvisor","referralCustomer","shareConsent","referralNotes","realEstateOutcome","categories"];
 const DEFAULT_PEOPLE_CATEGORIES=[{id:"candidate",name:"Candidates"},{id:"buyer",name:"Buyer"},{id:"insurance",name:"Insurance"},{id:"purged",name:"Purged"}];
 let PEOPLE_CATEGORIES=[],ALL_PEOPLE_NAME="All People",activePeopleCategory="candidate";
+let SOURCES=[];
 const IMPORT_TEMPLATE_COLS=["name","phone","whatsapp","age","city","location","gender","qualification","position","expType","expYears","source","salary","flag","status","followup","resume","notes","referralPool","referralAdvisor","referralCustomer","shareConsent","referralNotes"];
-let candidates=[],STAGES=DEFAULT_STAGES.slice(),activeFilter="all",activeRange="today",currentTab="list",db=null,auth=null,unsubscribe=null,useFirebase=false,pendingImport=[],pendingExportType="csv",pendingDupAction="skip",locationFilter="",sourceFilter="",qualificationFilter="",genderFilter="",ageFilter="",positionFilter="",expFilter="",sortMode="newest",referralOpportunityFilter="all",referralConsentFilter="all",selectedCandidateIds=new Set(),selectionMode=false,displayedLimit=50,formReturnPosition=null;
+let candidates=[],STAGES=DEFAULT_STAGES.slice(),activeFilter="all",activeRange="today",currentTab="list",db=null,auth=null,unsubscribe=null,unsubscribeSources=null,useFirebase=false,pendingImport=[],pendingExportType="csv",pendingDupAction="skip",locationFilter="",sourceFilter="",qualificationFilter="",genderFilter="",ageFilter="",positionFilter="",expFilter="",sortMode="newest",referralOpportunityFilter="all",referralConsentFilter="all",selectedCandidateIds=new Set(),selectionMode=false,displayedLimit=50,formReturnPosition=null;
 const CARD_FIELDS=["name","location","gender","age","phone","whatsapp","notes","qualification","position","experience","source","salary","priority","status","followup","resume"];const DEFAULT_CARD_FIELDS=["name","location","gender","age","phone","whatsapp","notes"];let visibleFields=(()=>{try{const v=JSON.parse(localStorage.getItem("chVisibleFields")||"null");return Array.isArray(v)&&v.length?v:DEFAULT_CARD_FIELDS.slice()}catch(e){return DEFAULT_CARD_FIELDS.slice()}})(),callQueue=[],callIndex=0,callOutcome="";
 function repairEmbeddedLogo(){const img=document.querySelector('.brand-mark img');if(!img)return;const raw=img.getAttribute('src')||'';if(raw.startsWith('data:image/'))return;const match=raw.match(/data:image\/png;base64,[A-Za-z0-9+/=]+/);if(match)img.src=match[0]}
 
 window.addEventListener("DOMContentLoaded",()=>{
   repairEmbeddedLogo();
   loadPeopleCategorySettings();
+  loadSourceSettings();
   try{const s=JSON.parse(localStorage.getItem("chStages")||"null");if(Array.isArray(s)&&s.length)STAGES=s}catch(e){}
-  populateStatusSelect();buildFilterChips();buildRangeChips();renderStagesSettings();renderCategoryManager();renderCategoryStrip();
+  populateStatusSelect();populateSourceSelect();buildFilterChips();buildRangeChips();renderStagesSettings();renderCategoryManager();renderSourceManager();renderCategoryStrip();
 
   // LOCAL FIRST: always restore the device copy before connecting to Firebase.
   // This prevents an empty/late cloud snapshot from making the app appear to have 0 candidates.
@@ -249,6 +253,79 @@ function renamePeopleCategory(id,name){name=String(name||'').trim();if(!name)ret
 function renameAllPeople(name){name=String(name||'').trim();if(!name)return renderCategoryManager();ALL_PEOPLE_NAME=name;savePeopleCategorySettings();toast('Heading renamed')}
 function addPeopleCategory(){if(PEOPLE_CATEGORIES.length>=7)return toast('Maximum 7 categories');const id='cat_'+Date.now().toString(36);PEOPLE_CATEGORIES.push({id,name:'New Category'});savePeopleCategorySettings()}
 function movePeopleCategory(id,dir){const i=PEOPLE_CATEGORIES.findIndex(x=>x.id===id),j=i+dir;if(i<0||j<0||j>=PEOPLE_CATEGORIES.length)return;[PEOPLE_CATEGORIES[i],PEOPLE_CATEGORIES[j]]=[PEOPLE_CATEGORIES[j],PEOPLE_CATEGORIES[i]];savePeopleCategorySettings()}
+function sourceKey(name){return String(name||'').trim().toLocaleLowerCase()}
+function newSourceId(){return 'src_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
+function loadSourceSettings(){
+  try{
+    const stored=JSON.parse(localStorage.getItem('chSources')||'null');
+    const rows=Array.isArray(stored)&&stored.length?stored:DEFAULT_SOURCES.map((name,i)=>({id:'src_default_'+i,name,active:true}));
+    const seen=new Set();
+    SOURCES=rows.map((x,i)=>({id:String(x.id||('src_saved_'+i)),name:String(x.name||'').trim(),active:x.active!==false})).filter(x=>x.name&&!seen.has(sourceKey(x.name))&&seen.add(sourceKey(x.name)));
+  }catch(e){SOURCES=DEFAULT_SOURCES.map((name,i)=>({id:'src_default_'+i,name,active:true}))}
+}
+function ensureCandidateSources(){
+  const known=new Set(SOURCES.map(x=>sourceKey(x.name)));let added=false;
+  candidates.forEach(c=>{const name=String(c.source||'').trim(),key=sourceKey(name);if(name&&!known.has(key)){SOURCES.push({id:newSourceId(),name,active:true});known.add(key);added=true}});
+  if(added)localStorage.setItem('chSources',JSON.stringify(SOURCES));
+}
+function sourceUsage(name){return candidates.filter(c=>sourceKey(c.source)===sourceKey(name)).length}
+function populateSourceSelect(preferred){
+  const sel=$('fSource');if(!sel)return;
+  const current=preferred!==undefined?String(preferred||''):sel.value;
+  const rows=SOURCES.slice();
+  if(current&&!rows.some(x=>sourceKey(x.name)===sourceKey(current)))rows.push({id:'legacy',name:current,active:false});
+  sel.innerHTML='<option value="">Select</option>'+rows.map(x=>`<option value="${escapeHtml(x.name)}" ${!x.active&&sourceKey(x.name)!==sourceKey(current)?'disabled':''}>${escapeHtml(x.name)}${x.active?'':' (archived)'}</option>`).join('');
+  sel.value=current;
+}
+function renderSourceManager(){
+  const el=$('sourceManager');if(!el)return;
+  el.innerHTML=SOURCES.map(x=>{const used=sourceUsage(x.name);return `<div style="padding:9px 0;border-bottom:1px solid var(--line)"><div style="display:flex;align-items:center;gap:8px"><span style="flex:1;font-weight:700">${escapeHtml(x.name)} <small style="color:var(--ink-soft)">(${used})${x.active?'':' · Archived'}</small></span><button class="chip" onclick="renameSource('${x.id}')">Rename</button><button class="chip" onclick="toggleSourceArchive('${x.id}')">${x.active?'Archive':'Activate'}</button></div><div class="btn-row" style="margin-top:7px"><button class="clear-filters" onclick="mergeSource('${x.id}')">Merge</button><button class="clear-filters" style="color:var(--red)" onclick="deleteSource('${x.id}')">Delete</button></div></div>`}).join('');
+}
+function saveSourceSettings(){
+  localStorage.setItem('chSources',JSON.stringify(SOURCES));populateSourceSelect();renderSourceManager();renderListControls();
+  if(useFirebase&&db)db.collection('meta').doc('sources').set({list:SOURCES,updatedAt:Date.now()}).catch(()=>{});
+}
+function addSource(name,selectAfter){
+  name=String(name||'').trim();if(!name)return null;
+  const existing=SOURCES.find(x=>sourceKey(x.name)===sourceKey(name));
+  if(existing){existing.active=true;saveSourceSettings();if(selectAfter)populateSourceSelect(existing.name);return existing.name}
+  SOURCES.push({id:newSourceId(),name,active:true});saveSourceSettings();if(selectAfter)populateSourceSelect(name);toast('Source added');return name;
+}
+function addSourceFromSettings(){const name=prompt('New recruitment source:');if(name)addSource(name,false)}
+function quickAddSource(){const name=prompt('New recruitment source:');if(name)addSource(name,true)}
+async function saveCandidateSourceChanges(changed){
+  saveLocal();
+  if(useFirebase&&db&&changed.length){
+    try{for(let i=0;i<changed.length;i+=400){const batch=db.batch();changed.slice(i,i+400).forEach(c=>{const id=c.id||firebaseCandidateId(c);if(!id)return;const stored={...c};delete stored.id;batch.set(db.collection('candidates').doc(id),stored,{merge:true})});await batch.commit()}}
+    catch(e){toast('Source saved locally; cloud update will retry after sync')}
+  }
+}
+async function replaceSourceEverywhere(oldName,newName){
+  const changed=candidates.filter(c=>sourceKey(c.source)===sourceKey(oldName));
+  const now=Date.now();changed.forEach(c=>{c.source=newName;c.updatedAt=now});
+  if(sourceKey(sourceFilter)===sourceKey(oldName))sourceFilter=newName;
+  await saveCandidateSourceChanges(changed);return changed.length;
+}
+async function renameSource(id){
+  const src=SOURCES.find(x=>x.id===id);if(!src)return;
+  const name=String(prompt('Rename source:',src.name)||'').trim();if(!name||name===src.name)return;
+  const duplicate=SOURCES.find(x=>x.id!==id&&sourceKey(x.name)===sourceKey(name));if(duplicate)return toast('That source already exists — use Merge instead');
+  const old=src.name;src.name=name;const count=await replaceSourceEverywhere(old,name);saveSourceSettings();render();toast(`Source renamed · ${count} candidate(s) updated`);
+}
+function toggleSourceArchive(id){const src=SOURCES.find(x=>x.id===id);if(!src)return;src.active=!src.active;saveSourceSettings();render();toast(src.active?'Source activated':'Source archived')}
+async function mergeSource(id){
+  const src=SOURCES.find(x=>x.id===id);if(!src)return;
+  const available=SOURCES.filter(x=>x.id!==id).map(x=>x.name);if(!available.length)return toast('Add another source before merging');
+  const answer=String(prompt(`Merge “${src.name}” into which source?\n\n${available.join(', ')}`)||'').trim();if(!answer)return;
+  const target=SOURCES.find(x=>x.id!==id&&sourceKey(x.name)===sourceKey(answer));if(!target)return toast('Please enter one of the listed source names');
+  const used=sourceUsage(src.name);if(!confirm(`Move ${used} candidate(s) from “${src.name}” to “${target.name}”, then remove “${src.name}”?`))return;
+  const count=await replaceSourceEverywhere(src.name,target.name);SOURCES=SOURCES.filter(x=>x.id!==id);target.active=true;saveSourceSettings();render();toast(`Sources merged · ${count} candidate(s) updated`);
+}
+function deleteSource(id){
+  const src=SOURCES.find(x=>x.id===id);if(!src)return;const used=sourceUsage(src.name);
+  if(used)return toast(`“${src.name}” is used by ${used} candidate(s) — merge or archive it instead`);
+  if(!confirm(`Delete unused source “${src.name}”?`))return;SOURCES=SOURCES.filter(x=>x.id!==id);saveSourceSettings();render();toast('Source deleted');
+}
 function loadLocal(){try{candidates=JSON.parse(localStorage.getItem("chCandidates")||"[]").map(hydrateCandidate)}catch(e){candidates=[]}render()}
 function saveLocal(){localStorage.setItem("chCandidates",JSON.stringify(candidates))}
 function escapeHtml(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
@@ -290,6 +367,7 @@ function mergeCloudCandidates(cloudRows){
 }
 function listenFirestore(){
   if(unsubscribe)unsubscribe();
+  if(unsubscribeSources)unsubscribeSources();
   // Do not order the Firestore query by createdAt here. Firestore excludes documents
   // that do not contain the ordered field, which made older/imported candidates
   // disappear and produced a misleading 0-candidate cloud count. We sort locally.
@@ -300,13 +378,17 @@ function listenFirestore(){
       render();
     },
     e=>toast("Sync error: "+e.message)
-  )
+  );
+  unsubscribeSources=db.collection("meta").doc("sources").onSnapshot(s=>{
+    const rows=s.exists?s.data().list:null;
+    if(Array.isArray(rows)&&rows.length){SOURCES=rows.map((x,i)=>({id:String(x.id||('src_cloud_'+i)),name:String(x.name||'').trim(),active:x.active!==false})).filter(x=>x.name);localStorage.setItem('chSources',JSON.stringify(SOURCES));ensureCandidateSources();populateSourceSelect();renderSourceManager()}
+  },e=>console.error('Source sync failed',e));
 }
-function disconnectFirebase(){if(unsubscribe)unsubscribe();useFirebase=false;localStorage.removeItem("chFirebaseConfig");updateSyncUI(false);loadLocal();toast("Disconnected. Saving locally.")}
+function disconnectFirebase(){if(unsubscribe)unsubscribe();if(unsubscribeSources)unsubscribeSources();unsubscribeSources=null;useFirebase=false;localStorage.removeItem("chFirebaseConfig");updateSyncUI(false);loadLocal();toast("Disconnected. Saving locally.")}
 function updateSyncUI(on){$("syncPill").className="sync-pill "+(on?"on":"off");$("syncPillText").textContent=on?"Synced across devices":"Local only · tap to sync devices";$("disconnectRow").style.display=on?"flex":"none"}
 
 function goTab(tab){currentTab=tab;["list","referral","report","insights","settings"].forEach(t=>$(t+"View").style.display=t===tab?"block":"none");$("listSearch").style.display=tab==="list"?"block":"none";$("statsScroll").style.display=tab==="list"?"flex":"none";$("filterScroll").style.display=tab==="list"?"flex":"none";$("listControls").style.display=tab==="list"?"":"none";$("filterToggleBtn").parentElement.style.display=tab==="list"?"block":"none";$("fabAdd").style.display=tab==="list"?"flex":"none";["List","Referral","Report","Insights","Settings"].forEach(n=>$("nav"+n).classList.toggle("active",n.toLowerCase()===tab));if(tab==="referral")renderReferralView();if(tab==="report")renderReport();if(tab==="insights")renderInsights();window.scrollTo(0,0)}
-function render(){if(!useFirebase)saveLocal();renderStats();renderCategoryStrip();renderList();renderStagesSettings();renderCategoryManager();if(currentTab==="referral")renderReferralView();if(currentTab==="report")renderReport();if(currentTab==="insights")renderInsights()}
+function render(){if(!useFirebase)saveLocal();ensureCandidateSources();populateSourceSelect();renderStats();renderCategoryStrip();renderList();renderStagesSettings();renderCategoryManager();renderSourceManager();if(currentTab==="referral")renderReferralView();if(currentTab==="report")renderReport();if(currentTab==="insights")renderInsights()}
 function populateStatusSelect(){const sel=$("fStatus");if(!sel)return;const cur=sel.value;sel.innerHTML=STAGES.map(s=>`<option ${s===cur?"selected":""}>${escapeHtml(s)}</option>`).join("")}
 function buildFilterChips(){
   const shortLabel={
@@ -584,7 +666,8 @@ function rememberFormPosition(id){if(!id){formReturnPosition=null;return}const c
 function restoreFormPosition(){if(!formReturnPosition)return;const p=formReturnPosition;formReturnPosition=null;const card=candidateCardElement(p.id);if(card&&p.top!=null)window.scrollBy(0,card.getBoundingClientRect().top-p.top);else window.scrollTo(0,p.scrollY||0)}
 async function quickDelete(id){if(!confirm("Delete this candidate?"))return;if(useFirebase)await db.collection("candidates").doc(id).delete();else{candidates=candidates.filter(c=>c.id!==id);render()}toast("Candidate deleted")}
 
-function renderInsights(){const base=candidates.filter(c=>!c.referralPool),total=base.length||1;$("stagePanel").innerHTML=STAGES.map(s=>{const n=base.filter(c=>c.status===s).length,sc=stageColor(s);return `<div class="field"><label>${escapeHtml(s)} — ${n}</label><div style="height:9px;background:var(--bg-soft);border-radius:99px;overflow:hidden"><div style="width:${Math.round(n/total*100)}%;height:100%;background:${sc.fg}"></div></div></div>`}).join("");$("flagPanel").innerHTML=["Hot","Warm","Cold"].map(f=>`<div class="field"><label>${FLAG_META[f].emoji} ${f} — ${base.filter(c=>c.flag===f).length}</label></div>`).join("");$("expPanel").innerHTML=`<p>Fresher: <b>${base.filter(c=>c.expType!=="Experienced").length}</b></p><p>Experienced: <b>${base.filter(c=>c.expType==="Experienced").length}</b></p>`}
+function renderInsights(){const base=candidates.filter(c=>!c.referralPool),total=base.length||1;$("stagePanel").innerHTML=STAGES.map(s=>{const n=base.filter(c=>c.status===s).length,sc=stageColor(s);return `<div class="field"><label>${escapeHtml(s)} — ${n}</label><div style="height:9px;background:var(--bg-soft);border-radius:99px;overflow:hidden"><div style="width:${Math.round(n/total*100)}%;height:100%;background:${sc.fg}"></div></div></div>`}).join("");$("flagPanel").innerHTML=["Hot","Warm","Cold"].map(f=>`<div class="field"><label>${FLAG_META[f].emoji} ${f} — ${base.filter(c=>c.flag===f).length}</label></div>`).join("");$("expPanel").innerHTML=`<p>Fresher: <b>${base.filter(c=>c.expType!=="Experienced").length}</b></p><p>Experienced: <b>${base.filter(c=>c.expType==="Experienced").length}</b></p>`;renderSourcePerformance()}
+function renderSourcePerformance(){const el=$("sourcePerformancePanel");if(!el)return;const names=[...new Set(candidates.map(c=>String(c.source||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));el.innerHTML=names.length?names.map(name=>{const rows=candidates.filter(c=>sourceKey(c.source)===sourceKey(name)),interviews=rows.filter(c=>c.status==='Interview Scheduled').length,joined=rows.filter(c=>c.status==='Joined').length,rate=rows.length?Math.round(joined/rows.length*100):0;return `<div style="padding:9px 0;border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:8px"><b>${escapeHtml(name)}</b><b>${rate}% joined</b></div><div class="mini">Candidates ${rows.length} · Interviews ${interviews} · Joined ${joined}</div><div style="height:7px;background:var(--bg-soft);border-radius:99px;overflow:hidden;margin-top:6px"><div style="width:${rate}%;height:100%;background:var(--primary)"></div></div></div>`}).join(''):'<p class="mini">Source performance will appear after candidates have a source.</p>'}
 function buildRangeChips(){const items=[["overdue","⏰ Overdue"],["today","Today"],["week","This week"],["month","This month"],["all","All upcoming"]];$("rangeScroll").innerHTML=items.map(([v,l])=>`<button class="chip${activeRange===v?" active":""}" onclick="setRange('${v}')">${l}</button>`).join("")}
 function setRange(v){activeRange=v;buildRangeChips();renderReport()}
 function reportMatches(c){if(!c.followup)return false;const t=new Date();t.setHours(0,0,0,0);const f=new Date(c.followup+"T00:00:00"),d=Math.round((f-t)/86400000);if(activeRange==="overdue")return d<0;if(activeRange==="today")return d===0;if(activeRange==="week")return d>=0&&d<=6;if(activeRange==="month")return d>=0&&f.getMonth()===t.getMonth()&&f.getFullYear()===t.getFullYear();return d>=0}
@@ -1025,6 +1108,9 @@ async function restoreBackupMerge(){const payload=window.pendingBackupRestore,ro
 function handleImportFile(e){const file=e.target.files[0];if(!file)return;const n=file.name.toLowerCase(),r=new FileReader();if(n.endsWith(".json")){r.onload=()=>{try{const p=JSON.parse(r.result);if(p&&Array.isArray(p.candidates))openBackupRestorePreview(p,file.name);else prepareImport(Array.isArray(p)?p:[p])}catch(err){console.error(err);toast("Invalid JSON backup")}finally{e.target.value=""}};r.readAsText(file)}else if(n.endsWith(".xlsx")||n.endsWith(".xls")){r.onload=()=>{try{if(typeof XLSX==='undefined')throw new Error('Excel library did not load');const wb=XLSX.read(new Uint8Array(r.result),{type:"array"});prepareImport(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:"",raw:false}))}catch(err){console.error(err);toast("Couldn't read Excel")}finally{e.target.value=""}};r.readAsArrayBuffer(file)}else{r.onload=()=>{try{prepareImport(parseCSV(r.result))}catch(err){console.error(err);toast("Couldn't read CSV")}finally{e.target.value=""}};r.readAsText(file)}}
 function parseCSV(text){const rows=[];let row=[],cur="",q=false;for(let i=0;i<text.length;i++){const ch=text[i];if(q){if(ch==='"'&&text[i+1]==='"'){cur+='"';i++}else if(ch==='"')q=false;else cur+=ch}else{if(ch==='"')q=true;else if(ch===','){row.push(cur);cur=""}else if(ch==='\n'){row.push(cur);rows.push(row);row=[];cur=""}else if(ch!=='\r')cur+=ch}}if(cur||row.length){row.push(cur);rows.push(row)}const headers=(rows.shift()||[]).map(canonicalKey);return rows.filter(r=>r.some(v=>String(v).trim())).map(r=>Object.fromEntries(headers.map((h,i)=>[h,r[i]??""])))}
 
+const restoreBackupMergeBase=restoreBackupMerge;
+restoreBackupMerge=async function(){const payload=window.pendingBackupRestore;if(Array.isArray(payload?.sources)&&payload.sources.length){SOURCES=payload.sources.map((x,i)=>({id:String(x.id||('src_restore_'+i)),name:String(x.name||'').trim(),active:x.active!==false})).filter(x=>x.name);saveSourceSettings()}return restoreBackupMergeBase()};
+
 let cleanupExportIds=[],cleanupExportDownloaded=false;
 function selectionOrFilteredRows(){
   const visible=filteredCandidates();
@@ -1077,7 +1163,7 @@ function csvCell(v){v=String(v??"");return /[",\n\r]/.test(v)?'"'+v.replace(/"/g
 function downloadCSV(rows){const txt=[EXPORT_COLS.join(","),...rows.map(c=>EXPORT_COLS.map(k=>csvCell(c[k])).join(","))].join("\r\n");downloadBlob(new Blob([txt],{type:"text/csv;charset=utf-8"}),"candidates.csv")}
 function downloadXLSX(rows,filename="candidates.xlsx"){const data=rows.map(c=>Object.fromEntries(EXPORT_COLS.map(k=>[k,Array.isArray(c[k])?c[k].join(" | "):(c[k]??"")])));const ws=XLSX.utils.json_to_sheet(data,{header:EXPORT_COLS}),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Candidates");XLSX.writeFile(wb,filename)}
 function fileTimestamp(d=new Date()){const p=n=>String(n).padStart(2,'0');return String(d.getFullYear()).slice(-2)+p(d.getMonth()+1)+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes())}
-function downloadJSON(rows){const payload={version:2,exportedAt:new Date().toISOString(),stages:STAGES,candidates:rows};const scope=rows.length===candidates.length?'all':'filtered';downloadBlob(new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),`candidate_hub_backup_${scope}_${fileTimestamp()}.json`)}
+function downloadJSON(rows){const payload={version:3,exportedAt:new Date().toISOString(),stages:STAGES,sources:SOURCES,candidates:rows};const scope=rows.length===candidates.length?'all':'filtered';downloadBlob(new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),`candidate_hub_backup_${scope}_${fileTimestamp()}.json`)}
 function downloadBlob(blob,name){const a=document.createElement("a"),u=URL.createObjectURL(blob);a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
 function referralExportRows(){const base=currentTab==='referral'?referralFilteredRows():candidates.filter(c=>c.referralPool);return base.filter(c=>c.shareConsent==='Consented')}
 function openReferralExportPreview(){const visible=currentTab==='referral'?referralFilteredRows():candidates.filter(c=>c.referralPool),rows=visible.filter(c=>c.shareConsent==='Consented'),blocked=visible.length-rows.length;$('previewTitle').textContent='⬆ XLSX Referral Export';$('previewBody').innerHTML=`<p class="mini"><b>${rows.length}</b> candidate(s) are ready for XLSX export. ${blocked?`<b>${blocked}</b> shown candidate(s) are excluded because sharing consent is Not asked or Declined.`:''} ${currentTab==='referral'?'The current Insurance Pool search/filter is respected.':''}</p>${rows.length?`<div class="preview-scroll"><table class="preview-table"><thead><tr><th>Name</th><th>City</th><th>Location</th><th>Zone</th><th>Opportunity</th><th>Consent</th></tr></thead><tbody>${rows.slice(0,20).map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.city||'')}</td><td>${escapeHtml(c.location||'')}</td><td>${escapeHtml(c.zone||generateZone(c.city,c.location))}</td><td>${escapeHtml(referralCategory(c))}</td><td>${escapeHtml(c.shareConsent||'')}</td></tr>`).join('')}</tbody></table></div><div class="btn-row"><button class="btn btn-ghost" onclick="closePreview()">Cancel</button><button class="btn btn-primary" onclick="downloadReferralXLSX()">⬆ Download XLSX</button></div>`:`<div class="empty-state"><span class="emoji">♻</span><h3>No consented candidates to export</h3><p>Only candidates marked Consented can be included when sharing contact details.</p></div><div class="btn-row"><button class="btn btn-ghost" onclick="closePreview()">Close</button></div>`}`;showPreview()}
